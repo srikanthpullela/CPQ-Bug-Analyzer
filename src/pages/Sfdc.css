@@ -1,0 +1,1085 @@
+/* File: src/Sfdc.css */
+
+/* Container fills viewport */
+.sfdc-root {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+/* Header with buttons & nav stays at top */
+.sfdc-header {
+  flex: 0 0 auto;
+  padding: 8px;
+  background: #f0f0f0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sfdc-btn {
+  padding: 8px 16px;
+  border: 1px solid #888;
+  background: white;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.sfdc-btn.active,
+.sfdc-btn:hover {
+  background: #ddd;
+  opacity: 0.2;
+}
+.sfdc-nav {
+  margin-left: auto;
+  font-size: 0.9em;
+}
+
+/* Panels wrapper now vertical */
+.sfdc-panels {
+  flex: 1 1 auto;
+  display: flex;
+  flex-direction: column;   /* stack vertically */
+  overflow: hidden;
+}
+
+/* Common panel styles */
+.panel {
+  width: 100%;               /* always full width */
+  transition: height 0.3s, opacity 0.3s;
+  overflow: auto;
+}
+
+/* When both panels visible: each takes 50% height */
+.half {
+  height: 50%;
+  opacity: 1;
+}
+
+/* When one panel is active: take ~99% height */
+.full {
+  height: 99%;
+  opacity: 1;
+}
+
+/* When inactive: collapse to a tiny footer */
+.collapsed {
+  height: 1%;
+  opacity: 0.3;
+}
+
+.request, .top {
+  border-bottom: 5px solid gray;
+}
+
+
+/* Json Formatter CSS */
+
+.formatter-container {
+  /* margin: 1rem auto; */
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  /* padding: 0 5rem; */
+}
+.formatter-input {
+  width: 100%;
+  height: 50px;
+  padding: 8px;
+  font-family: monospace;
+  font-size: 0.9rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  resize: vertic
+}
+.formatter-output {
+  width: 100%;
+  height: calc(100vh - 314px);
+  padding: 8px;
+  font-family: monospace;
+  font-size: 0.9rem;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  resize: vertical;
+}
+.formatter-button {
+  align-self: flex-start;
+  padding: 0.5rem 1rem;
+  background: #007bff;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.formatter-button:hover {
+  background: #0056b3;
+}
+
+.btn-format {
+  padding: 0.5rem 1rem;
+  /* margin-bottom: 1rem; */
+}
+
+.formatter-output-wrapper {
+  position: relative;
+}
+
+.btn-copy {
+  position: absolute;
+  top: 0.5rem;
+  right: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.Json-header-text {
+  margin: 0 !important;
+}
+.json-button {
+  width: fit-content;
+}
+
+.json-panels {
+  grid-gap: 1rem;
+}
+
+.json-panels textarea {
+  height: 50px;
+}
+
+.diff-button {
+  margin: 0 auto;
+  height: 2rem;
+  width: 10rem;
+}
+
+
+/*———————————————————————————————————————————————————
+  Table cell borders and hover‐highlight
+———————————————————————————————————————————————————*/
+table.min-w-full th,
+table.min-w-full td {
+  border: 1px solid #e5e7eb; /* same as Tailwind’s gray‐200 */
+}
+
+table.min-w-full tr:hover {
+  background-color: #f3f4f6; /* same as Tailwind’s gray‐100 */
+}
+
+/*———————————————————————————————————————————————————
+  Error / Info / Success / Warning row backgrounds
+  (lighten or tweak as desired)
+———————————————————————————————————————————————————*/
+.bg-red-100 {
+  background-color: #fef2f2 !important; /* override to a slightly pink hue */
+}
+.bg-yellow-100 {
+  background-color: #fefce8 !important; /* slightly softer than default */
+}
+.bg-green-100 {
+  background-color: #ecfdf5 !important; /* a gentle mint */
+}
+.bg-purple-100 {
+  background-color: #faf5ff !important; /* very light lavender */
+}
+
+/*———————————————————————————————————————————————————
+  “Ring” around a row when it matches the search term
+  (tailwind’s ring‐2 ring‐blue‐400 behavior)
+———————————————————————————————————————————————————*/
+.ring-2 {
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.5); /* blue‐400 @ 50% */
+}
+.ring-blue-400 {
+  /* combined with .ring-2, no extra rules needed here */
+}
+
+/*———————————————————————————————————————————————————
+  Detail‐panel scrollbars (optional “nice” styling)
+———————————————————————————————————————————————————*/
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background-color: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-track {
+  background-color: transparent;
+}
+
+/*———————————————————————————————————————————————————
+  Buttons (slightly stronger hover effects)
+———————————————————————————————————————————————————*/
+button.bg-blue-600:hover {
+  background-color: #2563eb; /* tailwind’s blue‐600 → blue‐700 */
+}
+
+button.bg-green-600:hover {
+  background-color: #15803d; /* tailwind’s green‐600 → green‐700 */
+}
+
+button.bg-indigo-500:hover {
+  background-color: #4338ca; /* tailwind’s indigo‐500 → indigo‐600 */
+}
+
+button.bg-indigo-700:hover {
+  background-color: #3730a3; /* tailwind’s indigo‐700 → indigo‐800 */
+}
+
+/*———————————————————————————————————————————————————
+  Make sure the tables’ cells don’t “bleed” together
+———————————————————————————————————————————————————*/
+table.min-w-full {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+table.min-w-full th,
+table.min-w-full td {
+  border-right: 1px solid #e5e7eb;
+  border-bottom: 1px solid #e5e7eb;
+}
+table.min-w-full th:last-child,
+table.min-w-full td:last-child {
+  border-right: none;
+}
+
+/*———————————————————————————————————————————————————
+  Responsive text truncation for very long EndPoint strings
+———————————————————————————————————————————————————*/
+td.break-all {
+  word-break: break-all;
+  white-space: normal;
+}
+
+/*———————————————————————————————————————————————————
+  Ensure left + right panels fill exactly 100vh
+———————————————————————————————————————————————————*/
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+.history-list {
+  overflow: auto;
+  /* height: 500px; */
+}
+
+.view-JSON {
+  height: 500px;
+  overflow: auto;
+}
+
+.Har-tab-container {
+
+}
+
+.search-content input, .search-content button {
+  height: 40px;
+}
+
+.history-diff-container {
+  height: 100vh;
+  z-index: 60;
+}
+.history-diff-container .history-diff {
+  height: 70vh;
+}
+.preview-data-container {
+  height: 100vh;
+  z-index: 60;
+}
+.preview-data {
+  height: 70vh;
+}
+
+.history-modal-container .history-modal {
+  height: 80vh;
+}
+
+.query-modal-container .query-modal {
+  height: 80vh;
+}
+
+/* Add these animation styles to your existing CSS file */
+
+/* Panel slide animation */
+.panel-container {
+  position: relative;
+  flex: 1;
+  overflow: hidden;
+}
+
+.panel-slide-enter {
+  transform: translateX(100%);
+}
+
+.panel-slide-enter-active {
+  transform: translateX(0);
+  transition: transform 300ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.panel-slide-exit {
+  transform: translateX(0);
+}
+
+.panel-slide-exit-active {
+  transform: translateX(100%);
+  transition: transform 300ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Modal overlay and content animations */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+
+.modal-content {
+  background-color: white;
+  border-radius: 0.5rem;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+  width: 90%;
+  max-width: 600px;
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+/* Table row animations */
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.table-row-appear {
+  animation: fadeIn 0.3s ease-out forwards;
+}
+
+/* Button hover animations */
+button {
+  transition: all 0.2s ease;
+}
+
+button:hover {
+  transform: translateY(-1px);
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+/* Link hover animations */
+a {
+  transition: color 0.2s ease;
+}
+
+/* Optimize animations for users who prefer reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .panel-slide-enter-active,
+  .panel-slide-exit-active {
+    transition: none !important;
+  }
+}
+
+
+
+/* Home.tsx */
+
+/* Enhanced Header Styles */
+.enhanced-header {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.header-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  transition: all 0.3s ease;
+}
+
+.page-selectors {
+  flex: 0 0 auto;
+}
+
+.tool-buttons {
+  flex: 1;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.controls {
+  flex: 0 0 auto;
+}
+
+.vs-separator {
+  color: rgba(255, 255, 255, 0.8);
+  font-weight: 600;
+  font-size: 14px;
+  margin: 0 8px;
+  transition: color 0.3s ease;
+}
+
+/* Enhanced Select Styles */
+.enhanced-select {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: white;
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 14px;
+  font-weight: 500;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  backdrop-filter: blur(10px);
+  min-width: 140px;
+}
+
+.enhanced-select:hover {
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.3);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.enhanced-select:focus {
+  outline: none;
+  border-color: rgba(255, 255, 255, 0.5);
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.1);
+}
+
+.enhanced-select option {
+  background: #2a2a2a;
+  color: white;
+  padding: 8px;
+}
+
+/* Enhanced Button Styles */
+.enhanced-btn {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: white;
+  border-radius: 8px;
+  padding: 8px 16px;
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  backdrop-filter: blur(10px);
+  position: relative;
+  overflow: hidden;
+}
+
+.enhanced-btn::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: -100%;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+  transition: left 0.5s ease;
+}
+
+.enhanced-btn:hover::before {
+  left: 100%;
+}
+
+.enhanced-btn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  border-color: rgba(255, 255, 255, 0.3);
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.2);
+}
+
+.enhanced-btn:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+}
+
+.btn-icon {
+  font-size: 16px;
+  transition: transform 0.3s ease;
+}
+
+.enhanced-btn:hover .btn-icon {
+  transform: scale(1.1);
+}
+
+.btn-text {
+  font-weight: 500;
+}
+
+/* Enhanced Filter Styles */
+.filter-container {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.enhanced-filter {
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  color: white;
+  border-radius: 20px;
+  padding: 8px 16px 8px 40px;
+  font-size: 14px;
+  width: 200px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  backdrop-filter: blur(10px);
+}
+
+.enhanced-filter::placeholder {
+  color: rgba(255, 255, 255, 0.6);
+}
+
+.enhanced-filter:focus {
+  outline: none;
+  background: rgba(255, 255, 255, 0.15);
+  border-color: rgba(255, 255, 255, 0.4);
+  width: 250px;
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.1);
+}
+
+.filter-icon {
+  position: absolute;
+  left: 12px;
+  color: rgba(255, 255, 255, 0.6);
+  font-size: 14px;
+  pointer-events: none;
+  transition: color 0.3s ease;
+}
+
+.enhanced-filter:focus + .filter-icon {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+/* Enhanced Sync Toggle */
+.enhanced-sync {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  transition: all 0.3s ease;
+}
+
+.sync-checkbox {
+  display: none;
+}
+
+.sync-slider {
+  position: relative;
+  width: 44px;
+  height: 24px;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 12px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+}
+
+.sync-slider::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  background: white;
+  border-radius: 50%;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+}
+
+.sync-checkbox:checked + .sync-slider {
+  background: rgba(76, 175, 80, 0.8);
+  border-color: rgba(76, 175, 80, 1);
+}
+
+.sync-checkbox:checked + .sync-slider::before {
+  transform: translateX(20px);
+  background: #4caf50;
+}
+
+.sync-text {
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 14px;
+  font-weight: 500;
+  transition: color 0.3s ease;
+}
+
+.enhanced-sync:hover .sync-text {
+  color: white;
+}
+
+/* Enhanced Navigation */
+.enhanced-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 20px;
+  backdrop-filter: blur(10px);
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  transition: all 0.3s ease;
+}
+
+.nav-link {
+  color: rgba(255, 255, 255, 0.8);
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  padding: 4px 8px;
+  border-radius: 6px;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+}
+
+.nav-link:hover {
+  color: white;
+  background: rgba(255, 255, 255, 0.1);
+  transform: translateY(-1px);
+}
+
+.nav-link.active {
+  color: white;
+  background: rgba(255, 255, 255, 0.2);
+}
+
+.nav-separator {
+  color: rgba(255, 255, 255, 0.4);
+  font-size: 12px;
+}
+
+/* Enhanced Panels */
+.enhanced-panels {
+  display: flex;
+  flex-direction: column;
+  height: calc(100vh - 120px);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  overflow: hidden;
+}
+
+.enhanced-panel {
+  background: white;
+  border-radius: 12px;
+  margin: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+  overflow: hidden;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 200px;
+}
+
+.enhanced-panel:hover {
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.12);
+  transform: translateY(-2px);
+}
+
+.panel-header {
+  background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+  padding: 12px 20px;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.06);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: relative;
+  flex-shrink: 0;
+  min-height: 60px;
+}
+
+.panel-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  color: #2c3e50;
+  transition: color 0.3s ease;
+}
+
+.panel-indicator {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  transition: all 0.3s ease;
+}
+
+.top-indicator {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  box-shadow: 0 0 10px rgba(102, 126, 234, 0.4);
+}
+
+.bottom-indicator {
+  background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+  box-shadow: 0 0 10px rgba(240, 147, 251, 0.4);
+}
+
+.panel-content {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Panel Divider */
+.draggable-divider {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 20px;
+  position: relative;
+  margin: 0 8px;
+  cursor: ns-resize;
+  z-index: 10;
+  user-select: none;
+}
+
+.draggable-divider:hover .divider-line {
+  background: linear-gradient(90deg, transparent, rgba(102, 126, 234, 0.3), transparent);
+}
+
+.draggable-divider:hover .divider-handle {
+  background: #667eea;
+  color: white;
+  transform: scale(1.2);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+.draggable-divider:active .divider-handle {
+  background: #5a67d8;
+  transform: scale(1.1);
+}
+
+.divider-line {
+  width: 100%;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, rgba(0, 0, 0, 0.1), transparent);
+  transition: all 0.3s ease;
+  border-radius: 1px;
+}
+
+.divider-handle {
+  position: absolute;
+  background: white;
+  color: rgba(0, 0, 0, 0.4);
+  padding: 6px 12px;
+  border-radius: 12px;
+  font-size: 14px;
+  font-weight: bold;
+  cursor: ns-resize;
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  border: 2px solid rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  letter-spacing: 2px;
+}
+
+/* Scrollable Panel Content */
+.scrollable-content {
+  height: calc(100% - 60px); /* Subtract header height */
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 16px;
+  position: relative;
+}
+
+/* Custom Scrollbar */
+.scrollable-content::-webkit-scrollbar {
+  width: 8px;
+}
+
+.scrollable-content::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 4px;
+}
+
+.scrollable-content::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 4px;
+  transition: background 0.3s ease;
+}
+
+.scrollable-content::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.3);
+}
+
+/* Firefox scrollbar */
+.scrollable-content {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(0, 0, 0, 0.2) rgba(0, 0, 0, 0.05);
+}
+
+/* Scroll Indicators */
+.scrollable-content::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 10px;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.1), transparent);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.scrollable-content::after {
+  content: "";
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 10px;
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.1), transparent);
+  opacity: 0;
+  transition: opacity 0.3s ease;
+  pointer-events: none;
+  z-index: 1;
+}
+
+.scrollable-content.has-scroll-top::before {
+  opacity: 1;
+}
+
+.scrollable-content.has-scroll-bottom::after {
+  opacity: 1;
+}
+
+/* Smooth Scrolling */
+.scrollable-content {
+  scroll-behavior: smooth;
+}
+
+/* Loading State for Content */
+.panel-content.loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+}
+
+.panel-content.loading::before {
+  content: "";
+  width: 40px;
+  height: 40px;
+  border: 4px solid rgba(102, 126, 234, 0.2);
+  border-top: 4px solid #667eea;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* Responsive Design */
+@media (max-width: 1024px) {
+  .enhanced-header {
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+  }
+
+  .header-section {
+    width: 100%;
+    justify-content: center;
+  }
+
+  .tool-buttons {
+    order: 2;
+  }
+
+  .controls {
+    order: 3;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .enhanced-nav {
+    order: 4;
+  }
+}
+
+@media (max-width: 768px) {
+  .enhanced-panels {
+    height: calc(100vh - 160px);
+  }
+
+  .scrollable-content {
+    padding: 12px;
+  }
+
+  .enhanced-filter:focus {
+    width: 200px;
+  }
+
+  .tool-buttons {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .enhanced-btn {
+    padding: 6px 12px;
+    font-size: 13px;
+  }
+
+  .btn-text {
+    display: none;
+  }
+
+  .enhanced-panel {
+    margin: 4px;
+    border-radius: 8px;
+  }
+
+  .divider-handle {
+    padding: 4px 8px;
+    font-size: 12px;
+  }
+}
+
+/* Animation Classes */
+@keyframes slideInFromTop {
+  from {
+    opacity: 0;
+    transform: translateY(-20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.enhanced-header {
+  animation: slideInFromTop 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.enhanced-panel {
+  animation: fadeIn 0.4s ease-out;
+}
+
+.enhanced-panel:nth-child(1) {
+  animation-delay: 0.1s;
+}
+
+.enhanced-panel:nth-child(3) {
+  animation-delay: 0.2s;
+}
+
+/* Focus and Accessibility */
+.enhanced-btn:focus,
+.enhanced-select:focus,
+.enhanced-filter:focus,
+.nav-link:focus {
+  outline: 2px solid rgba(255, 255, 255, 0.5);
+  outline-offset: 2px;
+}
+
+.enhanced-sync:focus-within .sync-slider {
+  box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.3);
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .enhanced-header {
+    background: #000;
+    border-bottom: 2px solid #fff;
+  }
+
+  .enhanced-btn,
+  .enhanced-select,
+  .enhanced-filter {
+    border: 2px solid #fff;
+  }
+
+  .panel-indicator {
+    border: 2px solid #000;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* High Performance Scrolling */
+.scrollable-content {
+  -webkit-overflow-scrolling: touch;
+  transform: translateZ(0);
+  will-change: scroll-position;
+}
+
+/* Focus States for Accessibility */
+.draggable-divider:focus {
+  outline: 2px solid #667eea;
+  outline-offset: 2px;
+}
+
+.draggable-divider:focus .divider-handle {
+  background: #667eea;
+  color: white;
+}
+
+
+.method-td {
+  width: 30rem;
+}
+
+.react-json-container .react-json-view {
+  font-size: 0.775rem !important;
+  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif !important;
+}
