@@ -49,7 +49,7 @@ export function useLiveHar() {
           console.log("[useLiveHar] Resetting logs and base URL");
           setHttpRows([]);
           setWsRows([]);
-            setWsBaseUrl("");
+          setWsBaseUrl("");
           break;
 
         case "WS_BASE_URL":

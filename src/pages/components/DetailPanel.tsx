@@ -338,30 +338,6 @@ export const DetailPanel: React.FC<Props> = ({
     }
   }, [searchQuery, formattedJSON, viewTree, findMatchesInRawJSON]);
 
-  // useEffect(() => {
-  //   setRequestPayloadOverride(data || {});
-  //   setRawPayloadText(JSON.stringify(data || {}, null, 2));
-  // }, [data]);
-
-  // const retriggerRequest = () => {
-  //   try {
-  //     const parsed = JSON.parse(rawPayloadText);
-  //     setRequestPayloadOverride(parsed); // Keep internal state synced
-  //     // Trigger request with parsed JSON
-  //     window.postMessage(
-  //       {
-  //         source: "HAR_EXTRACTOR",
-  //         type: "HAR_RETRIGGER",
-  //         url: finalUrl,
-  //         payload: parsed,
-  //       },
-  //       "*"
-  //     );
-  //   } catch (err) {
-  //     alert("Invalid JSON. Please fix before sending.");
-  //   }
-  // };
-
   if (!open) return null;
 
   return (
@@ -462,34 +438,6 @@ export const DetailPanel: React.FC<Props> = ({
             </button>
           </div>
         </div>
-
-        {/* {showEditRequest && isRequestView && (
-          <div className="p-4 border-b border-gray-200 bg-white space-y-3">
-            <div className="text-sm">
-              <strong>Method:</strong> {data.method}
-            </div>
-            <div className="text-sm break-words">
-              <strong>URL:</strong> {data.url}
-            </div>
-            <div>
-              <label className="block mb-1 text-sm font-medium">
-                Request Payload:
-              </label>
-              <textarea
-                className="w-full border rounded p-2 text-sm font-mono"
-                rows={6}
-                value={rawPayloadText}
-                onChange={(e) => setRawPayloadText(e.target.value)}
-              />
-            </div>
-            <button
-              onClick={retriggerRequest}
-              className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700 transition"
-            >
-              Send Request
-            </button>
-          </div>
-        )} */}
 
         {/* Search Bar - Only show when in Raw JSON view */}
         {searchVisible && !viewTree && (

@@ -2,7 +2,7 @@
 
 import type React from "react";
 import { useEffect, useMemo, useState } from "react";
-import { X, RotateCcw, AlertCircle, Send, Moon, Sun } from "lucide-react";
+import { X, RotateCcw, AlertCircle, Send, Moon, Sun, BarChart2, Search, Trash2, Zap, BellRing } from "lucide-react";
 import { useFieldHistory } from "../hooks/useFieldHistory";
 import { DetailPanel } from "./components/DetailPanel";
 import { HttpTableTab } from "./components/HttpTableTab";
@@ -14,6 +14,8 @@ import { useLiveHar } from "../hooks/useHarTab";
 import { safeCopyToClipboard } from "../utils/clipboard";
 import { HistoryModalTab } from "./components/HistoryModalTab";
 import HarQueryComponent from "./HarQueryComponent";
+import { toast, Toaster } from "react-hot-toast";
+import { deepEvaluateRule } from "../utils/RulesHelper";
 
 const HarMethodsTabPage: React.FC = () => {
   const { httpRows, wsRows, wsBaseUrl } = useLiveHar();
@@ -33,6 +35,17 @@ const HarMethodsTabPage: React.FC = () => {
   const [editMethod, setEditMethod] = useState("");
   const [editModalOpen, setEditModalOpen] = useState(false);
 
+  // Rules evaluation
+  const [rules, setRules] = useState([]);
+  const [ruleModalOpen, setRuleModalOpen] = useState(false);
+  const [newConditions, setNewConditions] = useState([
+    { fieldPath: "", operator: "===", value: "" },
+  ]);
+  const [methodNames, setMethodNames] = useState("");
+  const [matchCount, setMatchCount] = useState(0);
+  const [matchedResponses, setMatchedResponses] = useState([]);
+  const [showMatchesModal, setShowMatchesModal] = useState(false);
+
   // Add missing state for edit modal
   const [jsonValue, setJsonValue] = useState("");
   const [jsonError, setJsonError] = useState<string | null>(null);
@@ -45,6 +58,55 @@ const HarMethodsTabPage: React.FC = () => {
     }
     return false;
   });
+
+  // Rules evaluation effect
+  const addCondition = () =>
+    setNewConditions([
+      ...newConditions,
+      { fieldPath: "", operator: "===", value: "" },
+    ]);
+  const updateCondition = (i, field, val) => {
+    const updated = [...newConditions];
+    updated[i][field] = val;
+    setNewConditions(updated);
+  };
+
+  const openRuleModal = () => {
+    if (rules.length) {
+      setNewConditions(rules[0].conditions);
+      setMethodNames(rules[0].methodNames?.join(", ") || "");
+    } else {
+      setNewConditions([{ fieldPath: "", operator: "===", value: "" }]);
+      setMethodNames("");
+    }
+    setRuleModalOpen(true);
+  };
+
+  const saveRule = () => {
+    setRules([
+      {
+        id: Date.now().toString(),
+        conditions: newConditions,
+        methodNames: methodNames
+          .split(",")
+          .map((m) => m.trim())
+          .filter(Boolean),
+      },
+    ]);
+    setRuleModalOpen(false);
+  };
+
+  useEffect(() => {
+    if (!httpRows.length || !rules.length) return;
+    const latest = httpRows[httpRows.length - 1];
+    rules.forEach((r) => {
+      if (deepEvaluateRule(r, latest)) {
+        toast.success(`Rule matched for ${latest.method || "Call"}`);
+        setMatchCount((c) => c + 1);
+        setMatchedResponses((prev) => [...prev, latest]);
+      }
+    });
+  }, [httpRows]);
 
   // Dark mode effect
   useEffect(() => {
@@ -287,7 +349,7 @@ const HarMethodsTabPage: React.FC = () => {
             <div className="flex items-center gap-2">
               <button
                 onClick={toggleDarkMode}
-                className={`p-2 rounded-md transition-colors duration-200 ${
+                className={`p-2 rounded-md transition-colors ${
                   isDarkMode
                     ? "bg-gray-700 hover:bg-gray-600 text-yellow-400"
                     : "bg-gray-100 hover:bg-gray-200 text-gray-600"
@@ -302,49 +364,78 @@ const HarMethodsTabPage: React.FC = () => {
                   <Moon className="h-4 w-4" />
                 )}
               </button>
+
               <button
-                className={`px-3 py-1.5 text-xs rounded-md transition-colors font-medium ${
+                className={`p-2 rounded-md transition-colors ${
                   isDarkMode
-                    ? "bg-blue-700 text-white hover:bg-blue-600"
-                    : "bg-blue-600 text-white hover:bg-blue-700"
+                    ? "bg-blue-700 hover:bg-blue-600 text-white"
+                    : "bg-blue-600 hover:bg-blue-700 text-white"
                 }`}
                 onClick={requestHarReload}
                 title="Reload network logs"
               >
-                🔄 Reload
+                <RotateCcw className="h-4 w-4" />
               </button>
+
               <button
-                className={`px-3 py-1.5 text-xs rounded-md transition-colors font-medium ${
+                className={`p-2 rounded-md transition-colors ${
                   isDarkMode
-                    ? "bg-gray-700 text-white hover:bg-gray-600"
-                    : "bg-gray-600 text-white hover:bg-gray-700"
+                    ? "bg-gray-700 hover:bg-gray-600 text-white"
+                    : "bg-gray-600 hover:bg-gray-700 text-white"
                 }`}
                 onClick={() => setHistoryModalOpen(true)}
                 title="Track field changes over time"
               >
-                📊 History
+                <BarChart2 className="h-4 w-4" />
               </button>
+
               <button
-                className={`px-3 py-1.5 text-xs rounded-md transition-colors font-medium ${
+                className={`p-2 rounded-md transition-colors ${
                   isDarkMode
                     ? "bg-green-700 hover:bg-green-600 text-white"
                     : "bg-green-600 hover:bg-green-700 text-white"
                 }`}
                 onClick={() => setQueryModalOpen(true)}
-                title="Track field changes over time"
+                title="Query Search for payload or response"
               >
-                📊 Query Search
+                <Search className="h-4 w-4" />
               </button>
+
               <button
-                className={`px-3 py-1.5 text-xs rounded-md transition-colors font-medium ${
+                className={`p-2 rounded-md transition-colors ${
                   isDarkMode
-                    ? "bg-red-700 text-white hover:bg-red-600"
-                    : "bg-red-600 text-white hover:bg-red-700"
+                    ? "bg-red-700 hover:bg-red-600 text-white"
+                    : "bg-red-600 hover:bg-red-700 text-white"
                 }`}
                 onClick={requestClearLogs}
                 title="Clear all logs"
               >
-                🗑️ Clear
+                <Trash2 className="h-4 w-4" />
+              </button>
+
+              <button
+                className={`p-2 rounded-md transition-colors ${
+                  isDarkMode
+                    ? "bg-yellow-700 hover:bg-yellow-600 text-black"
+                    : "bg-yellow-500 hover:bg-yellow-400 text-black"
+                }`}
+                onClick={openRuleModal}
+                title={rules.length ? "Update Rule" : "Add Rule"}
+              >
+                <Zap className="h-4 w-4" />
+              </button>
+
+              <button
+                className={`p-2 rounded-md transition-colors flex ${
+                  isDarkMode
+                    ? "bg-red-700 hover:bg-red-600 text-white"
+                    : "bg-red-600 hover:bg-red-700 text-white"
+                }`}
+                onClick={() => setShowMatchesModal(true)}
+                title="View rule matches"
+              >
+                <BellRing className="h-4 w-4" />
+                <span className="ml-1 text-xs">{matchCount}</span>
               </button>
             </div>
           </div>
@@ -392,6 +483,7 @@ const HarMethodsTabPage: React.FC = () => {
             </div>
           )}
         </div>
+        <Toaster position="top-right" />
 
         {/* Tables Section */}
         <div className="space-y-3">
@@ -600,15 +692,108 @@ const HarMethodsTabPage: React.FC = () => {
         </div>
       )}
 
+      {ruleModalOpen && (
+        <div className="query-modal-container fixed inset-0 bg-black z-40 bg-opacity-30 backdrop-blur-sm flex items-center justify-center">
+          <div className="query-modal rounded-lg shadow-lg w-11/12 sm:w-3/4 lg:w-2/3 h-[85vh] flex flex-col min-h-0 z-50 transform transition-all duration-300 ease-out bg-white p-4">
+            <h2 className="text-lg font-bold">Add Rule</h2>
+            {newConditions.map((c, idx) => (
+              <div key={idx} className="flex gap-2">
+                <input
+                  className="flex-1 border px-2 py-1"
+                  placeholder="Field Path"
+                  value={c.fieldPath}
+                  onChange={(e) =>
+                    updateCondition(idx, "fieldPath", e.target.value)
+                  }
+                />
+                <select
+                  value={c.operator}
+                  onChange={(e) =>
+                    updateCondition(idx, "operator", e.target.value)
+                  }
+                  className="border px-2 py-1"
+                >
+                  <option value="===">===</option>
+                  <option value="!==">!==</option>
+                </select>
+                <input
+                  className="flex-1 border px-2 py-1"
+                  placeholder="Value"
+                  value={c.value}
+                  onChange={(e) =>
+                    updateCondition(idx, "value", e.target.value)
+                  }
+                />
+              </div>
+            ))}
+            <button
+              className="text-sm text-blue-600 mt-4"
+              onClick={addCondition}
+            >
+              + Add Condition
+            </button>
+            <input
+              className="w-full border px-2 py-1 mt-4"
+              placeholder="Method Names (optional, comma-separated)"
+              value={methodNames}
+              onChange={(e) => setMethodNames(e.target.value)}
+            />
+            <div className="flex justify-end gap-2 mt-4">
+              <button
+                className="px-4 py-1 bg-gray-300"
+                onClick={() => setRuleModalOpen(false)}
+              >
+                Cancel
+              </button>
+              <button
+                className="px-4 py-1 bg-green-600 text-white"
+                onClick={saveRule}
+              >
+                Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Matches Modal */}
+      {showMatchesModal && (
+        <div className="query-modal-container fixed inset-0 bg-black z-40 bg-opacity-30 backdrop-blur-sm flex items-center justify-center">
+          <div className="query-modal rounded-lg shadow-lg w-11/12 sm:w-3/4 lg:w-2/3 h-[85vh] flex flex-col min-h-0 z-50 transform transition-all duration-300 ease-out bg-white p-4">
+            <h2 className="text-lg font-bold">
+              Rule Matches ({matchedResponses.length})
+            </h2>
+            <div className="max-h-80 overflow-y-auto space-y-2">
+              {matchedResponses.map((r, i) => (
+                <pre
+                  key={i}
+                  className="p-2 bg-gray-100 dark:bg-gray-700 text-sm overflow-x-auto"
+                >
+                  {JSON.stringify(r, null, 2)}
+                </pre>
+              ))}
+            </div>
+            <div className="flex justify-end">
+              <button
+                className="px-4 py-1 bg-gray-300"
+                onClick={() => setShowMatchesModal(false)}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {editModalOpen && (
         <div
-          className={`history-modal-container fixed inset-0 z-40 backdrop-blur-sm flex items-center justify-center transition-colors ${
+          className={`query-modal-container fixed inset-0 bg-black z-40 bg-opacity-30 backdrop-blur-sm flex items-center justify-center ${
             isDarkMode ? "bg-black/70" : "bg-black/30"
           }`}
           onClick={() => setEditModalOpen(false)}
         >
           <div
-            className={`history-modal rounded-lg shadow-lg w-11/12 sm:w-3/4 lg:w-2/3 h-[85vh] flex flex-col min-h-0 z-50 transform transition-all duration-300 ease-out ${
+            className={`query-modal rounded-lg shadow-lg w-11/12 sm:w-3/4 lg:w-2/3 h-[85vh] flex flex-col min-h-0 z-50 transform transition-all duration-300 ease-out p-4 ${
               isDarkMode ? "bg-gray-800" : "bg-white"
             }`}
             onClick={(e) => e.stopPropagation()}
