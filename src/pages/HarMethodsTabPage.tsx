@@ -237,6 +237,7 @@ const HarMethodsTabPage: React.FC = () => {
             onToggleView={setViewTree}
             origin={origin}
             onEditRequest={editModalHook.handleEditRequest}
+            isDarkMode={isDarkMode}
           />
         }
       />
@@ -251,6 +252,7 @@ const HarMethodsTabPage: React.FC = () => {
         onChangeField={setFieldName}
         allFields={extractedKeys}
         origin={origin}
+        isDarkMode={isDarkMode}
       />
 
       {/* Query Modal */}
@@ -286,6 +288,7 @@ const HarMethodsTabPage: React.FC = () => {
         onUpdateCondition={rulesHook.updateCondition}
         onUpdateMethodNames={rulesHook.setMethodNames}
         onSave={rulesHook.saveRule}
+        isDarkMode={isDarkMode}
       />
 
       {/* Matches Modal */}
@@ -293,6 +296,7 @@ const HarMethodsTabPage: React.FC = () => {
         open={rulesHook.showMatchesModal}
         matchedResponses={rulesHook.matchedResponses}
         onClose={() => rulesHook.setShowMatchesModal(false)}
+        isDarkMode={isDarkMode}
       />
 
       {/* Edit Modal */}

@@ -14,6 +14,7 @@ interface Props {
   onToggleView: (isTree: boolean) => void;
   origin?: string;
   onEditRequest?: (payload: any, method: string) => void;
+  isDarkMode?: boolean;
 }
 
 interface SearchMatch {
@@ -101,6 +102,7 @@ export const DetailPanel: React.FC<Props> = ({
   onToggleView,
   origin,
   onEditRequest,
+  isDarkMode = false,
 }) => {
   // State
   const [searchQuery, setSearchQuery] = useState("");
@@ -341,11 +343,19 @@ export const DetailPanel: React.FC<Props> = ({
   if (!open) return null;
 
   return (
-    <div className="h-full bg-white flex flex-col shadow-lg">
+    <div className={`h-full flex flex-col shadow-lg transition-colors duration-200 ${
+      isDarkMode ? "bg-gray-800" : "bg-white"
+    }`}>
       {/* Header */}
-      <div className="flex-shrink-0 bg-white border-b border-gray-200 px-6 py-4">
+      <div className={`flex-shrink-0 border-b px-6 py-4 transition-colors duration-200 ${
+        isDarkMode 
+          ? "bg-gray-800 border-gray-700" 
+          : "bg-white border-gray-200"
+      }`}>
         <div className="flex justify-between items-center mb-4">
-          <span className="font-semibold text-gray-900 truncate pr-4">
+          <span className={`font-semibold truncate pr-4 transition-colors duration-200 ${
+            isDarkMode ? "text-gray-100" : "text-gray-900"
+          }`}>
             {title}
           </span>
           <div className="flex items-center gap-3">
@@ -360,8 +370,12 @@ export const DetailPanel: React.FC<Props> = ({
                 }}
                 className={`inline-flex items-center px-3 py-2 text-sm font-medium rounded-lg border transition-colors duration-200 ${
                   searchVisible
-                    ? "text-blue-700 bg-blue-50 border-blue-300"
-                    : "text-gray-700 bg-white border-gray-300 hover:bg-gray-50"
+                    ? (isDarkMode 
+                        ? "text-blue-300 bg-blue-900 border-blue-600" 
+                        : "text-blue-700 bg-blue-50 border-blue-300")
+                    : (isDarkMode 
+                        ? "text-gray-300 bg-gray-700 border-gray-600 hover:bg-gray-600" 
+                        : "text-gray-700 bg-white border-gray-300 hover:bg-gray-50")
                 }`}
               >
                 <svg
@@ -379,7 +393,11 @@ export const DetailPanel: React.FC<Props> = ({
                 </svg>
                 Search
                 {searchMatches.length > 0 && (
-                  <span className="ml-2 px-2 py-0.5 text-xs bg-blue-100 text-blue-800 rounded-full">
+                  <span className={`ml-2 px-2 py-0.5 text-xs rounded-full ${
+                    isDarkMode 
+                      ? "bg-blue-800 text-blue-200" 
+                      : "bg-blue-100 text-blue-800"
+                  }`}>
                     {searchMatches.length}
                   </span>
                 )}
@@ -393,7 +411,11 @@ export const DetailPanel: React.FC<Props> = ({
                     onEditRequest(data, data.method);
                   }
                 }}
-                className="inline-flex items-center px-4 py-2 text-sm font-medium text-white bg-green-600 hover:bg-green-700 rounded-lg transition-colors"
+                className={`inline-flex items-center px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors ${
+                  isDarkMode 
+                    ? "bg-green-700 hover:bg-green-600" 
+                    : "bg-green-600 hover:bg-green-700"
+                }`}
               >
                 Edit & Re-trigger
               </button>
@@ -401,7 +423,11 @@ export const DetailPanel: React.FC<Props> = ({
 
             <button
               onClick={onCopy}
-              className="inline-flex items-center px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 hover:text-blue-600 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 transition-colors duration-200"
+              className={`inline-flex items-center px-4 py-2 text-sm font-medium border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 transition-colors duration-200 ${
+                isDarkMode 
+                  ? "text-gray-200 bg-gray-700 border-gray-600 hover:bg-gray-600 hover:text-blue-300" 
+                  : "text-gray-700 bg-white border-gray-300 hover:bg-gray-50 hover:text-blue-600"
+              }`}
             >
               <svg
                 className="w-4 h-4 mr-2"
@@ -420,7 +446,11 @@ export const DetailPanel: React.FC<Props> = ({
             </button>
             <button
               onClick={onClose}
-              className="inline-flex items-center justify-center w-9 h-9 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 transition-colors duration-200"
+              className={`inline-flex items-center justify-center w-9 h-9 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 transition-colors duration-200 ${
+                isDarkMode 
+                  ? "text-gray-400 hover:text-gray-200 hover:bg-gray-700" 
+                  : "text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+              }`}
             >
               <svg
                 className="w-5 h-5"
@@ -441,7 +471,11 @@ export const DetailPanel: React.FC<Props> = ({
 
         {/* Search Bar - Only show when in Raw JSON view */}
         {searchVisible && !viewTree && (
-          <div className="mb-4 p-4 bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg border border-blue-200">
+          <div className={`mb-4 p-4 rounded-lg border transition-colors duration-200 ${
+            isDarkMode 
+              ? "bg-gradient-to-r from-gray-800 to-gray-700 border-gray-600" 
+              : "bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200"
+          }`}>
             <div className="flex items-center gap-2 mb-3">
               <div className="flex-1 relative">
                 <input
@@ -450,7 +484,11 @@ export const DetailPanel: React.FC<Props> = ({
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   placeholder="Search in JSON text..."
-                  className="w-full px-4 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 bg-white shadow-sm"
+                  className={`w-full px-4 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm transition-colors duration-200 ${
+                    isDarkMode 
+                      ? "border-gray-600 bg-gray-700 text-gray-100 placeholder-gray-400" 
+                      : "border-gray-300 bg-white text-gray-900 placeholder-gray-500"
+                  }`}
                 />
                 {searchQuery && (
                   <button
@@ -458,7 +496,11 @@ export const DetailPanel: React.FC<Props> = ({
                       setSearchQuery("");
                       setSearchMatches([]);
                     }}
-                    className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-400 hover:text-gray-600 transition-colors"
+                    className={`absolute right-3 top-1/2 transform -translate-y-1/2 transition-colors ${
+                      isDarkMode 
+                        ? "text-gray-400 hover:text-gray-200" 
+                        : "text-gray-400 hover:text-gray-600"
+                    }`}
                   >
                     <svg
                       className="w-4 h-4"
@@ -478,11 +520,17 @@ export const DetailPanel: React.FC<Props> = ({
               </div>
 
               {/* Navigation buttons */}
-              <div className="flex items-center gap-1 bg-white rounded-lg p-1 shadow-sm">
+              <div className={`flex items-center gap-1 rounded-lg p-1 shadow-sm transition-colors duration-200 ${
+                isDarkMode ? "bg-gray-700" : "bg-white"
+              }`}>
                 <button
                   onClick={goToPrevMatch}
                   disabled={searchMatches.length === 0}
-                  className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  className={`p-2 rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors ${
+                    isDarkMode 
+                      ? "text-gray-400 hover:text-gray-200 hover:bg-gray-600" 
+                      : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+                  }`}
                   title="Previous match (Shift+Enter)"
                 >
                   <svg
@@ -502,7 +550,11 @@ export const DetailPanel: React.FC<Props> = ({
                 <button
                   onClick={goToNextMatch}
                   disabled={searchMatches.length === 0}
-                  className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                  className={`p-2 rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors ${
+                    isDarkMode 
+                      ? "text-gray-400 hover:text-gray-200 hover:bg-gray-600" 
+                      : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+                  }`}
                   title="Next match (Enter)"
                 >
                   <svg
@@ -529,9 +581,15 @@ export const DetailPanel: React.FC<Props> = ({
                     type="checkbox"
                     checked={caseSensitive}
                     onChange={(e) => setCaseSensitive(e.target.checked)}
-                    className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 focus:ring-blue-500 focus:ring-2 rounded"
+                    className={`w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500 focus:ring-2 rounded ${
+                      isDarkMode ? "bg-gray-600" : "bg-gray-100"
+                    }`}
                   />
-                  <span className="ml-2 text-gray-700 group-hover:text-gray-900">
+                  <span className={`ml-2 transition-colors duration-200 ${
+                    isDarkMode 
+                      ? "text-gray-300 group-hover:text-gray-100" 
+                      : "text-gray-700 group-hover:text-gray-900"
+                  }`}>
                     Case sensitive
                   </span>
                 </label>
@@ -539,18 +597,24 @@ export const DetailPanel: React.FC<Props> = ({
 
               <div className="flex items-center gap-2">
                 {searchMatches.length > 0 && (
-                  <div className="flex items-center gap-1 px-2 py-1 bg-white rounded-md shadow-sm">
+                  <div className={`flex items-center gap-1 px-2 py-1 rounded-md shadow-sm transition-colors duration-200 ${
+                    isDarkMode ? "bg-gray-700" : "bg-white"
+                  }`}>
                     <div className="w-2 h-2 bg-yellow-400 rounded-full"></div>
-                    <span className="text-xs text-gray-600">Highlighted</span>
+                    <span className={`text-xs transition-colors duration-200 ${
+                      isDarkMode ? "text-gray-300" : "text-gray-600"
+                    }`}>Highlighted</span>
                   </div>
                 )}
-                <div className="text-gray-600 font-medium">
+                <div className={`font-medium transition-colors duration-200 ${
+                  isDarkMode ? "text-gray-300" : "text-gray-600"
+                }`}>
                   {searchMatches.length > 0 ? (
-                    <span className="text-blue-700">
+                    <span className={isDarkMode ? "text-blue-300" : "text-blue-700"}>
                       {currentMatchIndex + 1} of {searchMatches.length} matches
                     </span>
                   ) : searchQuery ? (
-                    <span className="text-red-600">No matches found</span>
+                    <span className={isDarkMode ? "text-red-400" : "text-red-600"}>No matches found</span>
                   ) : (
                     <span>Enter search term</span>
                   )}
@@ -567,9 +631,15 @@ export const DetailPanel: React.FC<Props> = ({
               type="radio"
               checked={viewTree}
               onChange={() => onToggleView(true)}
-              className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 focus:ring-blue-500 focus:ring-2 transition-colors duration-200"
+              className={`w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500 focus:ring-2 transition-colors duration-200 ${
+                isDarkMode ? "bg-gray-600" : "bg-gray-100"
+              }`}
             />
-            <span className="ml-3 text-sm font-medium text-gray-700 group-hover:text-gray-900">
+            <span className={`ml-3 text-sm font-medium transition-colors duration-200 ${
+              isDarkMode 
+                ? "text-gray-300 group-hover:text-gray-100" 
+                : "text-gray-700 group-hover:text-gray-900"
+            }`}>
               Tree View
             </span>
           </label>
@@ -578,17 +648,29 @@ export const DetailPanel: React.FC<Props> = ({
               type="radio"
               checked={!viewTree}
               onChange={() => onToggleView(false)}
-              className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 focus:ring-blue-500 focus:ring-2 transition-colors duration-200"
+              className={`w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500 focus:ring-2 transition-colors duration-200 ${
+                isDarkMode ? "bg-gray-600" : "bg-gray-100"
+              }`}
             />
-            <span className="ml-3 text-sm font-medium text-gray-700 group-hover:text-gray-900">
+            <span className={`ml-3 text-sm font-medium transition-colors duration-200 ${
+              isDarkMode 
+                ? "text-gray-300 group-hover:text-gray-100" 
+                : "text-gray-700 group-hover:text-gray-900"
+            }`}>
               Raw JSON
             </span>
           </label>
         </div>
       </div>
       {/* Content */}
-      <div className="flex-1 px-4 py-4 bg-gray-50 min-h-0">
-        <div className="bg-white rounded-lg border border-gray-200 h-full flex flex-col">
+      <div className={`flex-1 px-4 py-4 min-h-0 transition-colors duration-200 ${
+        isDarkMode ? "bg-gray-900" : "bg-gray-50"
+      }`}>
+        <div className={`rounded-lg border h-full flex flex-col transition-colors duration-200 ${
+          isDarkMode 
+            ? "bg-gray-800 border-gray-700" 
+            : "bg-white border-gray-200"
+        }`}>
           {viewTree ? (
             <div className="flex-1 min-h-0 p-4">
               <div
@@ -616,31 +698,54 @@ export const DetailPanel: React.FC<Props> = ({
                     maxHeight: "100%",
                     overflow: "visible",
                   }}
-                  theme={{
-                    base00: "transparent",
-                    base01: "#f8f9fa",
-                    base02: "#e9ecef",
-                    base03: "#6c757d",
-                    base04: "#495057",
-                    base05: "#212529",
-                    base06: "#212529",
-                    base07: "#000000",
-                    base08: "#dc3545",
-                    base09: "#fd7e14",
-                    base0A: "#ffc107",
-                    base0B: "#28a745",
-                    base0C: "#17a2b8",
-                    base0D: "#007bff",
-                    base0E: "#6f42c1",
-                    base0F: "#6c757d",
-                  }}
+                  theme={
+                    isDarkMode
+                      ? {
+                          base00: "transparent", // editor background
+                          base01: "#374151", // lighter background
+                          base02: "#4b5563", // selection background
+                          base03: "#6b7280", // comments
+                          base04: "#9ca3af", // dark foreground
+                          base05: "#f3f4f6", // default foreground
+                          base06: "#f9fafb", // light foreground
+                          base07: "#ffffff", // lightest foreground
+                          base08: "#f87171", // red
+                          base09: "#fb923c", // orange
+                          base0A: "#fbbf24", // yellow
+                          base0B: "#34d399", // green
+                          base0C: "#22d3ee", // cyan
+                          base0D: "#60a5fa", // blue
+                          base0E: "#a78bfa", // purple
+                          base0F: "#9ca3af", // brown
+                        }
+                      : {
+                          base00: "transparent",
+                          base01: "#f8f9fa",
+                          base02: "#e9ecef",
+                          base03: "#6c757d",
+                          base04: "#495057",
+                          base05: "#212529",
+                          base06: "#212529",
+                          base07: "#000000",
+                          base08: "#dc3545",
+                          base09: "#fd7e14",
+                          base0A: "#ffc107",
+                          base0B: "#28a745",
+                          base0C: "#17a2b8",
+                          base0D: "#007bff",
+                          base0E: "#6f42c1",
+                          base0F: "#6c757d",
+                        }
+                  }
                 />
               </div>
             </div>
           ) : (
             <div
               ref={rawJsonContainerRef}
-              className="flex-1 m-4 font-mono text-sm text-gray-800 leading-relaxed overflow-auto"
+              className={`flex-1 m-4 font-mono text-sm leading-relaxed overflow-auto transition-colors duration-200 ${
+                isDarkMode ? "text-gray-200" : "text-gray-800"
+              }`}
             >
               {renderHighlightedJSON(formattedJSON)}
             </div>

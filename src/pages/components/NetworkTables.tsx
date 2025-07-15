@@ -132,6 +132,7 @@ export const NetworkTables: React.FC<NetworkTablesProps> = ({
               filter={searchTerm}
               selectedRowKey={selectedRowKey}
               onView={onView}
+              isDarkMode={isDarkMode}
             />
           </div>
         </div>
@@ -180,6 +181,7 @@ export const NetworkTables: React.FC<NetworkTablesProps> = ({
               filter={searchTerm}
               selectedRowKey={selectedRowKey}
               onView={onView}
+              isDarkMode={isDarkMode}
             />
           </div>
         </div>

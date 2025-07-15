@@ -30,6 +30,7 @@ interface Props {
   onChangeField: (v: string) => void;
   allFields: string[];
   origin?: string;
+  isDarkMode?: boolean;
 }
 
 export const HistoryModalTab: React.FC<Props> = ({
@@ -41,6 +42,7 @@ export const HistoryModalTab: React.FC<Props> = ({
   onChangeField,
   allFields,
   origin,
+  isDarkMode = false,
 }) => {
   const [previewData, setPreviewData] = useState<any | null>(null);
   const [previewTitle, setPreviewTitle] = useState<string>("");

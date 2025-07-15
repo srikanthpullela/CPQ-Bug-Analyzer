@@ -15,6 +15,7 @@ interface Props {
   baseUrl: string;
   selectedRowKey: string | null;
   onView: (rowKey: string, title: string, data: any) => void;
+  isDarkMode?: boolean;
 }
 
 export const WsTableTab: React.FC<Props> = ({
@@ -23,6 +24,7 @@ export const WsTableTab: React.FC<Props> = ({
   baseUrl,
   onView,
   selectedRowKey,
+  isDarkMode = false,
 }) => {
   const matches = (row: WsRow) =>
     (row.time + row.endpoint + row.action + JSON.stringify(row.payload))
@@ -35,13 +37,19 @@ export const WsTableTab: React.FC<Props> = ({
     const infoDetails = w.payload?.PayLoad?.InfoDetails;
 
     if (errorDetails && Object.keys(errorDetails).length > 0) {
-      return "bg-red-100 border-l-4 border-red-500";
+      return isDarkMode 
+        ? "bg-red-900 border-l-4 border-red-500" 
+        : "bg-red-100 border-l-4 border-red-500";
     }
     if (warningDetails && Object.keys(warningDetails).length > 0) {
-      return "bg-yellow-100 border-l-4 border-yellow-500";
+      return isDarkMode 
+        ? "bg-yellow-900 border-l-4 border-yellow-500" 
+        : "bg-yellow-100 border-l-4 border-yellow-500";
     }
     if (infoDetails && Object.keys(infoDetails).length > 0) {
-      return "bg-blue-100 border-l-4 border-blue-500";
+      return isDarkMode 
+        ? "bg-blue-900 border-l-4 border-blue-500" 
+        : "bg-blue-100 border-l-4 border-blue-500";
     }
 
     return "";
@@ -49,20 +57,54 @@ export const WsTableTab: React.FC<Props> = ({
 
   if (!rows.length) return null;
   return (
-    <div className="border rounded overflow-hidden">
-      <h3 className="bg-gray-100 p-2 font-semibold">WebSocket Calls</h3>
-      <div className="px-4 py-2 text-sm">
+    <div className={`rounded overflow-hidden transition-colors duration-200 ${
+      isDarkMode ? "bg-gray-800" : "bg-white"
+    }`}>
+      <h3 className={`p-2 font-semibold transition-colors duration-200 ${
+        isDarkMode 
+          ? "bg-gray-700 text-gray-100" 
+          : "bg-gray-100 text-gray-900"
+      }`}>WebSocket Calls</h3>
+      <div className={`px-3 py-1 text-sm transition-colors duration-200 ${
+        isDarkMode ? "text-gray-300" : "text-gray-700"
+      }`}>
         <em>Connection URL: {baseUrl}</em>
       </div>
       <table className="min-w-full table-auto">
-        <thead className="bg-gray-50">
+        <thead className={`transition-colors duration-200 ${
+          isDarkMode ? "bg-gray-700" : "bg-gray-50"
+        }`}>
           <tr>
-            <th>#</th>
-            <th>Time</th>
-            <th>EndPoint</th>
-            <th>Action</th>
-            <th>Status</th>
-            <th>View</th>
+            <th className={`px-3 py-1 text-left text-sm font-medium transition-colors duration-200 ${
+              isDarkMode 
+                ? "text-gray-200" 
+                : "text-gray-700"
+            }`}>#</th>
+            <th className={`px-3 py-1 text-left text-sm font-medium transition-colors duration-200 ${
+              isDarkMode 
+                ? "text-gray-200" 
+                : "text-gray-700"
+            }`}>Time</th>
+            <th className={`px-3 py-1 text-left text-sm font-medium transition-colors duration-200 ${
+              isDarkMode 
+                ? "text-gray-200" 
+                : "text-gray-700"
+            }`}>EndPoint</th>
+            <th className={`px-3 py-1 text-left text-sm font-medium transition-colors duration-200 ${
+              isDarkMode 
+                ? "text-gray-200" 
+                : "text-gray-700"
+            }`}>Action</th>
+            <th className={`px-3 py-1 text-left text-sm font-medium transition-colors duration-200 ${
+              isDarkMode 
+                ? "text-gray-200" 
+                : "text-gray-700"
+            }`}>Status</th>
+            <th className={`px-3 py-1 text-left text-sm font-medium transition-colors duration-200 ${
+              isDarkMode 
+                ? "text-gray-200" 
+                : "text-gray-700"
+            }`}>View</th>
           </tr>
         </thead>
         <tbody>
@@ -79,24 +121,57 @@ export const WsTableTab: React.FC<Props> = ({
             return (
               <tr
                 key={i}
-                className={`${
+                className={`transition-colors duration-200 cursor-pointer ${
                   selectedRowKey === `ws-${i}` 
-                    ? "ring-2 ring-blue-500 bg-blue-50 border-blue-200" 
+                    ? (isDarkMode 
+                        ? "bg-blue-800 border-blue-600" 
+                        : "bg-blue-100 border-blue-300")
                     : ""
                 } ${
                   selectedRowKey === `ws-${i}` 
                     ? "" 
-                    : `${rowColor} hover:bg-gray-100`
+                    : getWsRowColorClass(w) ||
+                      (i % 2 === 0 
+                        ? isDarkMode 
+                          ? "bg-gray-800 hover:bg-gray-600" 
+                          : "bg-white hover:bg-gray-50"
+                        : isDarkMode 
+                          ? "bg-gray-900 hover:bg-gray-600" 
+                          : "bg-gray-50 hover:bg-gray-100")
                 }`}
               >
-                <td className="border px-4">{i + 1}</td>
-                <td className="border px-4">{w.time}</td>
-                <td className="border px-4 break-all">{w.endpoint}</td>
-                <td className="border px-4">{w.action || "—"}</td>
-                <td className="border px-4">{w.status ?? "–"}</td>
-                <td className="border px-4">
+                <td className={`px-3 py-1 text-sm transition-colors duration-200 ${
+                  isDarkMode 
+                    ? "text-gray-200" 
+                    : "text-gray-900"
+                }`}>{i + 1}</td>
+                <td className={`px-3 py-1 text-sm transition-colors duration-200 ${
+                  isDarkMode 
+                    ? "text-gray-200" 
+                    : "text-gray-900"
+                }`}>{w.time}</td>
+                <td className={`px-3 py-1 text-sm break-all transition-colors duration-200 ${
+                  isDarkMode 
+                    ? "text-gray-200" 
+                    : "text-gray-900"
+                }`}>{w.endpoint}</td>
+                <td className={`px-3 py-1 text-sm transition-colors duration-200 ${
+                  isDarkMode 
+                    ? "text-gray-200" 
+                    : "text-gray-900"
+                }`}>{w.action || "—"}</td>
+                <td className={`px-3 py-1 text-sm transition-colors duration-200 ${
+                  isDarkMode 
+                    ? "text-gray-200" 
+                    : "text-gray-900"
+                }`}>{w.status ?? "–"}</td>
+                <td className={`px-3 py-1 transition-colors duration-200`}>
                   <button
-                    className="px-2 py-1 bg-indigo-500 text-white rounded"
+                    className={`px-2 py-0.5 text-xs font-medium text-white rounded transition-colors duration-200 ${
+                      isDarkMode 
+                        ? "bg-indigo-600 hover:bg-indigo-500" 
+                        : "bg-indigo-500 hover:bg-indigo-600"
+                    }`}
                     onClick={() =>
                       onView(`ws-${i}`, `WS ▶ ${w.action}`, w.payload)
                     }

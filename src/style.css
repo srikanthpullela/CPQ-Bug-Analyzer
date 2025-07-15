@@ -137,7 +137,7 @@ body {
 /* Table styling */
 .table-container {
   overflow-x: auto;
-  border: 1px solid #ccc;
+  border: 1px solid #e2e8f0; /* Subtle grayish border for container */
   border-radius: 4px;
   margin-top: 16px;
 }
@@ -150,8 +150,10 @@ body {
 }
 
 .table-container th,
-.table-container td {
-   border: 1px solid #ccc;
+.table-container td,
+table th,
+table td {
+   border: 1px solid #e2e8f0 !important; /* Subtle grayish border - smooth on eyes */
   /* allow wrapping only at whitespace, never mid-word */
   white-space: normal !important;
   word-wrap: normal;
@@ -182,4 +184,234 @@ body {
 .search-wrapper .clear-search {
   cursor: pointer;
   padding: 10px;
+}
+
+/* Scrollbar styling for better dark mode visibility */
+/* Webkit browsers (Chrome, Safari, Edge) */
+::-webkit-scrollbar {
+  width: 12px;
+  height: 12px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Light mode scrollbar */
+html:not(.dark) ::-webkit-scrollbar-thumb {
+  background: #cbd5e1; /* gray-300 */
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+html:not(.dark) ::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8; /* gray-400 */
+  background-clip: content-box;
+}
+
+/* Dark mode scrollbar */
+html.dark ::-webkit-scrollbar-thumb {
+  background: #4b5563; /* gray-600 */
+  border-radius: 6px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+
+html.dark ::-webkit-scrollbar-thumb:hover {
+  background: #6b7280; /* gray-500 */
+  background-clip: content-box;
+}
+
+/* Firefox scrollbar */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+html.dark {
+  scrollbar-color: #4b5563 transparent;
+}
+
+/* Custom table container for better scrolling */
+.table-container {
+  scrollbar-width: thin;
+}
+
+html:not(.dark) .table-container {
+  scrollbar-color: #cbd5e1 transparent;
+}
+
+html.dark .table-container {
+  scrollbar-color: #4b5563 transparent;
+}
+
+/* Fix table hover and selection visibility in dark mode */
+/* Light mode table hover */
+html:not(.dark) .table-container table tr:hover,
+html:not(.dark) table.min-w-full tr:hover,
+html:not(.dark) table tr:hover {
+  background-color: rgb(243, 244, 246) !important; /* gray-100 */
+}
+
+/* Dark mode table hover - very light gray for visibility */
+html.dark .table-container table tr:hover,
+html.dark table.min-w-full tr:hover,
+html.dark table tr:hover {
+  background-color: rgb(55, 65, 81) !important; /* gray-700 - much lighter than dark background */
+}
+
+/* Dark mode selected row highlighting */
+html.dark table.min-w-full tr.bg-blue-100 {
+  background-color: rgb(30, 58, 138) !important; /* blue-800 */
+  color: rgb(219, 234, 254) !important; /* blue-100 text */
+}
+
+html.dark table.min-w-full tr.bg-yellow-100 {
+  background-color: rgb(146, 64, 14) !important; /* amber-800 */
+  color: rgb(254, 243, 199) !important; /* amber-100 text */
+}
+
+/* Override any Tailwind classes that might be interfering */
+.bg-blue-100,
+tr.bg-blue-100,
+.bg-blue-100 * {
+  background-color: rgb(219, 234, 254) !important;
+  color: rgb(30, 64, 175) !important;
+  border-color: rgb(219, 234, 254) !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+.bg-yellow-100,
+tr.bg-yellow-100,
+.bg-yellow-100 * {
+  background-color: rgb(254, 243, 199) !important;
+  color: rgb(146, 64, 14) !important;
+  border-color: rgb(254, 243, 199) !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+html.dark .bg-blue-100,
+html.dark tr.bg-blue-100,
+html.dark .bg-blue-100 * {
+  background-color: rgb(30, 58, 138) !important;
+  color: rgb(219, 234, 254) !important;
+  border-color: rgb(30, 58, 138) !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+html.dark .bg-yellow-100,
+html.dark tr.bg-yellow-100,
+html.dark .bg-yellow-100 * {
+  background-color: rgb(146, 64, 14) !important;
+  color: rgb(254, 243, 199) !important;
+  border-color: rgb(146, 64, 14) !important;
+  outline: none !important;
+  box-shadow: none !important;
+}
+
+/* Remove any Tailwind ring utilities that might interfere */
+.bg-blue-100,
+tr.bg-blue-100 {
+  --tw-ring-shadow: none !important;
+  --tw-ring-offset-shadow: none !important;
+}
+
+.bg-yellow-100,
+tr.bg-yellow-100 {
+  --tw-ring-shadow: none !important;
+  --tw-ring-offset-shadow: none !important;
+}
+
+/* Fix table borders in dark mode - make them much subtler */
+html.dark .table-container,
+html.dark .table-container th,
+html.dark .table-container td,
+html.dark table th,
+html.dark table td,
+html.dark table {
+  border-color: rgb(31, 41, 55) !important; /* gray-800 - very subtle, almost invisible */
+}
+
+/* Dark mode table headers */
+html.dark .table-container thead,
+html.dark table thead {
+  background-color: rgb(31, 41, 55) !important; /* gray-800 */
+  color: rgb(229, 231, 235) !important; /* gray-200 */
+}
+
+html.dark .table-container thead th,
+html.dark table thead th {
+  background-color: rgb(31, 41, 55) !important; /* gray-800 */
+  color: rgb(229, 231, 235) !important; /* gray-200 */
+}
+
+/* Ensure text visibility in dark mode tables */
+html.dark .table-container td,
+html.dark .table-container th,
+html.dark table td,
+html.dark table th {
+  color: rgb(229, 231, 235) !important; /* gray-200 */
+}
+
+/* Selected row highlighting with background colors (no rings) - More specific selectors */
+/* Light mode selected rows */
+html:not(.dark) .table-container tr.bg-blue-100,
+html:not(.dark) table tr.bg-blue-100,
+html:not(.dark) tr.bg-blue-100 {
+  background-color: rgb(219, 234, 254) !important; /* blue-100 */
+  color: rgb(30, 64, 175) !important; /* blue-800 text */
+}
+
+html:not(.dark) .table-container tr.bg-blue-100 td,
+html:not(.dark) table tr.bg-blue-100 td,
+html:not(.dark) tr.bg-blue-100 td {
+  background-color: rgb(219, 234, 254) !important; /* blue-100 */
+  color: rgb(30, 64, 175) !important; /* blue-800 text */
+}
+
+html:not(.dark) .table-container tr.bg-yellow-100,
+html:not(.dark) table tr.bg-yellow-100,
+html:not(.dark) tr.bg-yellow-100 {
+  background-color: rgb(254, 243, 199) !important; /* amber-100 */
+  color: rgb(146, 64, 14) !important; /* amber-800 text */
+}
+
+html:not(.dark) .table-container tr.bg-yellow-100 td,
+html:not(.dark) table tr.bg-yellow-100 td,
+html:not(.dark) tr.bg-yellow-100 td {
+  background-color: rgb(254, 243, 199) !important; /* amber-100 */
+  color: rgb(146, 64, 14) !important; /* amber-800 text */
+}
+
+/* Dark mode selected rows */
+html.dark .table-container tr.bg-blue-100,
+html.dark table tr.bg-blue-100,
+html.dark tr.bg-blue-100 {
+  background-color: rgb(30, 58, 138) !important; /* blue-800 */
+  color: rgb(219, 234, 254) !important; /* blue-100 text */
+}
+
+html.dark .table-container tr.bg-blue-100 td,
+html.dark table tr.bg-blue-100 td,
+html.dark tr.bg-blue-100 td {
+  background-color: rgb(30, 58, 138) !important; /* blue-800 */
+  color: rgb(219, 234, 254) !important; /* blue-100 text */
+}
+
+html.dark .table-container tr.bg-yellow-100,
+html.dark table tr.bg-yellow-100,
+html.dark tr.bg-yellow-100 {
+  background-color: rgb(146, 64, 14) !important; /* amber-800 */
+  color: rgb(254, 243, 199) !important; /* amber-100 text */
+}
+
+html.dark .table-container tr.bg-yellow-100 td,
+html.dark table tr.bg-yellow-100 td,
+html.dark tr.bg-yellow-100 td {
+  background-color: rgb(146, 64, 14) !important; /* amber-800 */
+  color: rgb(254, 243, 199) !important; /* amber-100 text */
 }

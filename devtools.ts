@@ -180,6 +180,7 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
       chrome.devtools.network.getHAR((harLog) => {
         for (const entry of harLog.entries || []) {
           if (!entry.request.url.includes("apexremote")) continue;
+          if (!entry.request.url.includes("congacloud")) continue;
 
           const rid = (entry as any)._requestId;
           if (seenRequests.has(rid)) continue;
@@ -227,7 +228,10 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
       if (rid && seenRequests.has(rid)) return;
       if (rid) seenRequests.add(rid);
 
-      if (request.request.url.includes("apexremote")) {
+      if (
+        request.request.url.includes("apexremote") ||
+        request.request.url.includes("congacloud")
+      ) {
         const extractReq = (cb: (j: any) => void) => {
           if (typeof request.getRequestBody === "function") {
             request.getRequestBody((b) => {
