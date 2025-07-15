@@ -147,8 +147,10 @@ export function useLiveHar() {
 
           console.log("[useLiveHar] Reloading HAR via getHAR()");
           chrome.devtools.network.getHAR((harLog) => {
-            const entries = (harLog.entries || []).filter((e) =>
-              e.request.url.includes("apexremote")
+            const entries = (harLog.entries || []).filter(
+              (e) =>
+                e.request.url.includes("apexremote") ||
+                e.request.url.includes("congacloud")
             );
 
             if (!entries.length) {

@@ -113,6 +113,26 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
         scheduleHarReload();
       }
 
+      if (method === "Network.webSocketCreated") {
+        const wsUrl = params.url;
+        const key = `ws-create-${wsUrl}`;
+        if (seenWsMessages.has(key)) return;
+        seenWsMessages.add(key);
+
+        panelWindow.postMessage(
+          {
+            source: "HAR_EXTRACTOR",
+            type: "WS_CREATED",
+            payload: {
+              wsUrl,
+              time: new Date().toLocaleTimeString("en-GB"),
+              timestamp: Date.now(),
+            },
+          },
+          "*"
+        );
+      }
+
       if (method === "Page.loadEventFired") {
         console.log("🔄 Page reload detected → clearing HTTP & WS data");
         seenRequests.clear();

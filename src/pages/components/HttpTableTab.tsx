@@ -1,3 +1,4 @@
+// src/components/HttpTableTab.tsx
 import React from "react";
 
 export interface HttpRow {
@@ -14,11 +15,16 @@ export interface HttpRow {
 interface Props {
   rows: HttpRow[];
   filter: string;
-  onView: (title: string, data: any) => void;
+  selectedRowKey: string | null;
+  onView: (rowKey: string, title: string, data: any) => void;
 }
 
-export const HttpTableTab: React.FC<Props> = ({ rows, filter, onView }) => {
-  // 1) Filter rows by search term
+export const HttpTableTab: React.FC<Props> = ({
+  rows,
+  filter,
+  selectedRowKey,
+  onView,
+}) => {
   const filtered = rows.filter((r) => {
     const combined = `${r.time} ${r.method} ${JSON.stringify(
       r.requestPayload
@@ -26,7 +32,6 @@ export const HttpTableTab: React.FC<Props> = ({ rows, filter, onView }) => {
     return !filter || combined.toLowerCase().includes(filter.toLowerCase());
   });
 
-  // 2) Collapse / group by unique ID
   type GroupKey = string;
   interface GroupedRow {
     time: string;
@@ -130,8 +135,14 @@ export const HttpTableTab: React.FC<Props> = ({ rows, filter, onView }) => {
             <tr
               key={gr.id || i}
               className={`${
-                getRowColorClass(gr) ||
-                (i % 2 === 0 ? "bg-white" : "bg-gray-50")
+                selectedRowKey === `http-${i}` 
+                  ? "ring-2 ring-blue-500 bg-blue-50 border-blue-200" 
+                  : ""
+              } ${
+                selectedRowKey === `http-${i}` 
+                  ? "" 
+                  : getRowColorClass(gr) ||
+                    (i % 2 === 0 ? "bg-white" : "bg-gray-50")
               }`}
             >
               <td className="border px-4">{i + 1}</td>
@@ -152,6 +163,7 @@ export const HttpTableTab: React.FC<Props> = ({ rows, filter, onView }) => {
                     } text-white rounded`}
                     onClick={() =>
                       onView(
+                        `http-${i}`,
                         `${gr.method} ▶ ${action}`,
                         action === "Request"
                           ? gr.lastRequestPayload
