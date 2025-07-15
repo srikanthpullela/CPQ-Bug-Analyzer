@@ -10,6 +10,11 @@ export interface HttpRow {
   id: string;
   startTime: number;
   endTime?: number;
+  urlPattern?: string;
+  patternType?: 'apex' | 'http' | 'generic';
+  httpMethod?: string;
+  endpoint?: string;
+  displayName?: string;
 }
 
 interface Props {
@@ -18,6 +23,7 @@ interface Props {
   selectedRowKey: string | null;
   onView: (rowKey: string, title: string, data: any) => void;
   isDarkMode?: boolean;
+  headerTitle?: string;
 }
 
 export const HttpTableTab: React.FC<Props> = ({
@@ -26,6 +32,7 @@ export const HttpTableTab: React.FC<Props> = ({
   selectedRowKey,
   onView,
   isDarkMode = false,
+  headerTitle = "API Methods",
 }) => {
   const filtered = rows.filter((r) => {
     const combined = `${r.time} ${r.method} ${JSON.stringify(
@@ -45,6 +52,11 @@ export const HttpTableTab: React.FC<Props> = ({
     id?: string;
     startTime: number;
     endTime?: number;
+    urlPattern?: string;
+    patternType?: 'apex' | 'http' | 'generic';
+    httpMethod?: string;
+    endpoint?: string;
+    displayName?: string;
   }
 
   const groups: Record<GroupKey, GroupedRow> = {};
@@ -82,6 +94,11 @@ export const HttpTableTab: React.FC<Props> = ({
         startTime: r.startTime,
         endTime: r.endTime,
         id: r.id,
+        urlPattern: r.urlPattern,
+        patternType: r.patternType,
+        httpMethod: r.httpMethod,
+        endpoint: r.endpoint,
+        displayName: r.displayName,
       };
       order.push(keyToUse);
     }
@@ -143,7 +160,7 @@ export const HttpTableTab: React.FC<Props> = ({
           ? "bg-gray-700 text-gray-100 border-b border-gray-600" 
           : "bg-gray-100 text-gray-800 border-b border-gray-200"
       }`}>
-        ApexRemote Methods
+        {headerTitle}
       </h3>
       <table className="min-w-full table-auto">
         <thead className={`transition-colors duration-200 ${
@@ -165,6 +182,11 @@ export const HttpTableTab: React.FC<Props> = ({
                 ? "text-gray-200" 
                 : "text-gray-700"
             }`}>Method</th>
+            <th className={`px-3 py-1 text-left text-sm font-medium transition-colors duration-200 ${
+              isDarkMode 
+                ? "text-gray-200" 
+                : "text-gray-700"
+            }`}>Type</th>
             <th className={`px-3 py-1 text-left text-sm font-medium transition-colors duration-200 ${
               isDarkMode 
                 ? "text-gray-200" 
@@ -219,7 +241,32 @@ export const HttpTableTab: React.FC<Props> = ({
                 isDarkMode 
                   ? "text-gray-200" 
                   : "text-gray-700"
-              }`}>{gr.method}</td>
+              }`} title={gr.patternType === 'http' ? gr.endpoint || gr.method : gr.method}>
+                <div className="truncate max-w-xs">
+                  {gr.patternType === 'http' ? gr.endpoint || gr.method : gr.method}
+                </div>
+              </td>
+              <td className={`px-3 py-1 text-sm transition-colors duration-200 ${
+                isDarkMode 
+                  ? "text-gray-200" 
+                  : "text-gray-700"
+              }`}>
+                <span className={`px-2 py-0.5 text-xs rounded font-medium ${
+                  gr.patternType === 'apex'
+                    ? isDarkMode 
+                      ? "bg-purple-800 text-purple-200" 
+                      : "bg-purple-100 text-purple-800"
+                    : gr.patternType === 'http'
+                    ? isDarkMode 
+                      ? "bg-green-800 text-green-200" 
+                      : "bg-green-100 text-green-800"
+                    : isDarkMode 
+                      ? "bg-gray-700 text-gray-200" 
+                      : "bg-gray-100 text-gray-700"
+                }`} title={gr.patternType === 'http' ? `${gr.httpMethod || 'HTTP'} - ${gr.urlPattern || 'HTTP API'}` : gr.urlPattern || 'Unknown'}>
+                  {gr.patternType === 'http' ? gr.httpMethod || 'HTTP' : gr.urlPattern || 'Unknown'}
+                </span>
+              </td>
               <td className={`px-3 py-1 text-sm transition-colors duration-200 ${
                 isDarkMode 
                   ? "text-gray-200" 
@@ -265,7 +312,7 @@ export const HttpTableTab: React.FC<Props> = ({
           ))}
           {displayRows.length === 0 && (
             <tr>
-              <td colSpan={6} className={`text-center py-4 transition-colors duration-200 ${
+              <td colSpan={7} className={`text-center py-4 transition-colors duration-200 ${
                 isDarkMode ? "text-gray-400" : "text-gray-500"
               }`}>
                 No HTTP calls found.

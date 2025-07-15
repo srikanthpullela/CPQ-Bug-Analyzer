@@ -1,5 +1,5 @@
 import React from "react";
-import { RotateCcw, Moon, Sun, BarChart2, Search, Trash2, Zap, BellRing } from "lucide-react";
+import { RotateCcw, Moon, Sun, BarChart2, Search, Trash2, Zap, BellRing, Settings } from "lucide-react";
 import { SearchInput } from "./SearchInput";
 
 interface HeaderSectionProps {
@@ -21,6 +21,7 @@ interface HeaderSectionProps {
   openRuleModal: () => void;
   setShowMatchesModal: (open: boolean) => void;
   setSearchTerm: (term: string) => void;
+  openUrlPatternSettings: () => void;
 }
 
 export const HeaderSection: React.FC<HeaderSectionProps> = ({
@@ -42,6 +43,7 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
   openRuleModal,
   setShowMatchesModal,
   setSearchTerm,
+  openUrlPatternSettings,
 }) => {
   return (
     <div
@@ -102,6 +104,18 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
           </div>
         </div>
         <div className="flex items-center gap-2">
+          <button
+            onClick={openUrlPatternSettings}
+            className={`p-2 rounded-md transition-colors ${
+              isDarkMode
+                ? "bg-gray-700 hover:bg-gray-600 text-gray-300"
+                : "bg-gray-100 hover:bg-gray-200 text-gray-600"
+            }`}
+            title="Configure URL patterns"
+          >
+            <Settings className="h-4 w-4" />
+          </button>
+
           <button
             onClick={toggleDarkMode}
             className={`p-2 rounded-md transition-colors ${

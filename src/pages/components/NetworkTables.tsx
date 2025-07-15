@@ -2,6 +2,23 @@ import React from "react";
 import { HttpTableTab } from "./HttpTableTab";
 import { WsTableTab } from "./WsTableTab1";
 
+function getActivePatternNames(): string {
+  try {
+    const stored = localStorage.getItem('har_extractor_url_patterns');
+    if (stored) {
+      const patterns = JSON.parse(stored);
+      const activeNames = patterns
+        .filter((p: any) => p.enabled)
+        .map((p: any) => p.name)
+        .join(' & ');
+      return activeNames || 'API Methods';
+    }
+  } catch (error) {
+    console.warn('Error reading URL patterns for header:', error);
+  }
+  return 'API Methods';
+}
+
 interface NetworkTablesProps {
   httpRows: any[];
   wsRows: any[];
@@ -133,6 +150,7 @@ export const NetworkTables: React.FC<NetworkTablesProps> = ({
               selectedRowKey={selectedRowKey}
               onView={onView}
               isDarkMode={isDarkMode}
+              headerTitle={getActivePatternNames()}
             />
           </div>
         </div>

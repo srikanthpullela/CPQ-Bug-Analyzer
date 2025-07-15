@@ -55,6 +55,26 @@ export const WsTableTab: React.FC<Props> = ({
     return "";
   }
 
+  const getDisplayUrl = (url: string): string => {
+    if (!url) return "Not connected";
+    
+    try {
+      const urlObj = new URL(url);
+      // Show protocol, hostname and port (if not default)
+      let displayUrl = `${urlObj.protocol}//${urlObj.hostname}`;
+      if (urlObj.port && urlObj.port !== '80' && urlObj.port !== '443') {
+        displayUrl += `:${urlObj.port}`;
+      }
+      // Add the path if it's meaningful
+      if (urlObj.pathname && urlObj.pathname !== '/') {
+        displayUrl += urlObj.pathname;
+      }
+      return displayUrl;
+    } catch {
+      return url; // Fallback to original URL if parsing fails
+    }
+  };
+
   if (!rows.length) return null;
   return (
     <div className={`rounded overflow-hidden transition-colors duration-200 ${
@@ -67,8 +87,8 @@ export const WsTableTab: React.FC<Props> = ({
       }`}>WebSocket Calls</h3>
       <div className={`px-3 py-1 text-sm transition-colors duration-200 ${
         isDarkMode ? "text-gray-300" : "text-gray-700"
-      }`}>
-        <em>Connection URL: {baseUrl}</em>
+      }`} title={baseUrl}>
+        <em>Connection: {getDisplayUrl(baseUrl)}</em>
       </div>
       <table className="min-w-full table-auto">
         <thead className={`transition-colors duration-200 ${
@@ -157,9 +177,9 @@ export const WsTableTab: React.FC<Props> = ({
                 }`}>{w.endpoint}</td>
                 <td className={`px-3 py-1 text-sm transition-colors duration-200 ${
                   isDarkMode 
-                    ? "text-gray-200" 
-                    : "text-gray-900"
-                }`}>{w.action || "—"}</td>
+                    ? "text-green-400" 
+                    : "text-green-600"
+                } font-medium uppercase`}>{w.action || "—"}</td>
                 <td className={`px-3 py-1 text-sm transition-colors duration-200 ${
                   isDarkMode 
                     ? "text-gray-200" 

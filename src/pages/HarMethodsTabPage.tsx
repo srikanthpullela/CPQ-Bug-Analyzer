@@ -10,6 +10,7 @@ import { EditModal } from "./components/EditModal";
 import { RuleModal } from "./components/RuleModal";
 import { MatchesModal } from "./components/MatchesModal";
 import { ResizablePanels } from "./components/ResizablePanels";
+import { UrlPatternSettings } from "./components/UrlPatternSettings";
 import "../style.css";
 import "./Sfdc.css";
 import { useLiveHar } from "../hooks/useHarTab";
@@ -34,6 +35,7 @@ const HarMethodsTabPage: React.FC = () => {
   const [origin, setOrigin] = useState("");
   const [queryModalOpen, setQueryModalOpen] = useState(false);
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
+  const [urlPatternSettingsOpen, setUrlPatternSettingsOpen] = useState(false);
 
   // Dark mode state
   const [isDarkMode, setIsDarkMode] = useState(() => {
@@ -207,6 +209,7 @@ const HarMethodsTabPage: React.FC = () => {
               openRuleModal={rulesHook.openRuleModal}
               setShowMatchesModal={rulesHook.setShowMatchesModal}
               setSearchTerm={setSearchTerm}
+              openUrlPatternSettings={() => setUrlPatternSettingsOpen(true)}
             />
             <Toaster position="top-right" />
 
@@ -312,6 +315,14 @@ const HarMethodsTabPage: React.FC = () => {
         onResetToOriginal={editModalHook.resetToOriginal}
         onSendRequest={editModalHook.handleSendRequest}
       />
+
+      {/* URL Pattern Settings Modal */}
+      {urlPatternSettingsOpen && (
+        <UrlPatternSettings
+          isDarkMode={isDarkMode}
+          onClose={() => setUrlPatternSettingsOpen(false)}
+        />
+      )}
 
       <style>{`
         .search-input-light {
