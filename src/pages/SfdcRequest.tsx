@@ -56,7 +56,7 @@ const SfdcRequest: React.FC<SfdcRequestProps> = ({
   return (
     <div className="main p-4 space-y-4">
       <div className="flex items-start gap-4">
-        <h2 className="text-xl font-bold pt-2 whitespace-nowrap">
+        <h2 className="text-l font-bold pt-2 whitespace-nowrap">
           SFDC Request
         </h2>
 

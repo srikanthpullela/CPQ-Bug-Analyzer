@@ -40,29 +40,19 @@ function getUrlPatternsFromStorage(): UrlPattern[] {
     const stored = localStorage.getItem('har_extractor_url_patterns');
     if (stored) {
       const patterns = JSON.parse(stored);
+      console.log('📖 devtools.ts: Loaded patterns from localStorage:', patterns);
       
-      // STRICT FILTERING: Only allow ApexRemote and CongaCloud patterns
-      const allowedPatterns = ['apexremote', 'congacloud'];
-      const filteredPatterns = patterns.filter((p: UrlPattern) => {
-        return allowedPatterns.includes(p.pattern.toLowerCase()) && 
-               (p.name.toLowerCase() === 'apexremote' || p.name.toLowerCase() === 'congacloud');
-      });
-      
-      // If we filtered out patterns or have no valid patterns, reset to defaults
-      if (filteredPatterns.length !== patterns.length || filteredPatterns.length === 0) {
-        console.log('Filtering out invalid patterns or resetting to defaults - only ApexRemote and CongaCloud allowed');
-        const defaults = getDefaultUrlPatterns();
-        saveUrlPatternsToStorage(defaults);
-        return defaults;
+      // Simply return what's in localStorage - no filtering or modification
+      if (Array.isArray(patterns) && patterns.length > 0) {
+        return patterns;
       }
-      
-      return filteredPatterns;
     }
   } catch (error) {
-    console.warn('Error reading URL patterns from localStorage:', error);
+    console.warn('⚠️ devtools.ts: Error reading URL patterns from localStorage:', error);
   }
   
-  // First time or error - set defaults
+  // Only use defaults if no localStorage data exists
+  console.log('📝 devtools.ts: No localStorage patterns found, using defaults');
   const defaults = getDefaultUrlPatterns();
   saveUrlPatternsToStorage(defaults);
   return defaults;
@@ -99,11 +89,11 @@ function shouldProcessUrl(url: string): UrlPattern | null {
     return null;
   }
   
-  // STRICT FILTERING: Only process ApexRemote and CongaCloud URLs
-  const allowedPatterns = ['apexremote', 'congacloud'];
+  // Use patterns as configured by user - no more strict filtering
   const matchedPattern = patterns.find(p => p.enabled && url.includes(p.pattern));
   
-  if (matchedPattern && allowedPatterns.includes(matchedPattern.pattern.toLowerCase())) {
+  if (matchedPattern) {
+    console.log('🎯 devtools.ts: URL matched pattern:', matchedPattern.name, 'for URL:', url);
     return matchedPattern;
   }
   
@@ -203,8 +193,8 @@ function processRequestByPattern(request: any, reqJson: any, resJson: any, patte
 chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
   let currentTabId: number | null = null;
 
-  // Force clean patterns at startup to ensure only ApexRemote and CongaCloud are allowed
-  forceResetUrlPatterns();
+  // Don't force reset patterns anymore - let localStorage persist user changes
+  console.log('📋 devtools.ts: Panel created, using existing localStorage patterns');
 
   panel.onShown.addListener((panelWindow) => {
     const tabId = chrome.devtools.inspectedWindow.tabId;
@@ -530,10 +520,4 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
   });
 });
 
-// Force clear and reset localStorage patterns to only allow ApexRemote and CongaCloud
-function forceResetUrlPatterns(): void {
-  console.log('🔒 Force resetting URL patterns to only ApexRemote and CongaCloud');
-  const strictDefaults = getDefaultUrlPatterns();
-  localStorage.removeItem('har_extractor_url_patterns');
-  saveUrlPatternsToStorage(strictDefaults);
-}
+// Remove the force reset function - let user settings persist

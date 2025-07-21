@@ -12,6 +12,7 @@ export const useRules = (httpRows: any[]) => {
   const [matchCount, setMatchCount] = useState(0);
   const [matchedResponses, setMatchedResponses] = useState([]);
   const [showMatchesModal, setShowMatchesModal] = useState(false);
+  const [processedRequestIds, setProcessedRequestIds] = useState(new Set());
 
   const addCondition = () =>
     setNewConditions([
@@ -48,20 +49,71 @@ export const useRules = (httpRows: any[]) => {
       },
     ]);
     setRuleModalOpen(false);
+    // Clear processed IDs when rules change
+    setProcessedRequestIds(new Set());
+    setMatchedResponses([]);
+    setMatchCount(0);
   };
 
-  // Rules evaluation effect
+  const clearMatches = () => {
+    setMatchedResponses([]);
+    setMatchCount(0);
+    setProcessedRequestIds(new Set());
+  };
+
+  // Clear matches when httpRows is empty (logs cleared)
+  useEffect(() => {
+    if (httpRows.length === 0) {
+      setMatchedResponses([]);
+      setMatchCount(0);
+      setProcessedRequestIds(new Set());
+    }
+  }, [httpRows.length]);
+
+  // Rules evaluation effect - only check response payload and prevent duplicates
   useEffect(() => {
     if (!httpRows.length || !rules.length) return;
+    
     const latest = httpRows[httpRows.length - 1];
-    rules.forEach((r) => {
-      if (deepEvaluateRule(r, latest)) {
+    
+    // Skip if we've already processed this request (prevent duplicates)
+    if (!latest.id || processedRequestIds.has(latest.id)) {
+      return;
+    }
+    
+    // Only evaluate rules on response payload, not request
+    if (!latest.responsePayload) {
+      return;
+    }
+    
+    rules.forEach((rule) => {
+      // Create a context object with only response data for rule evaluation
+      const responseContext = {
+        responsePayload: latest.responsePayload,
+        method: latest.method,
+        status: latest.status,
+        endpoint: latest.endpoint,
+        displayName: latest.displayName
+      };
+      
+      if (deepEvaluateRule(rule, responseContext)) {
         toast.success(`Rule matched for ${latest.method || "Call"}`);
         setMatchCount((c) => c + 1);
-        setMatchedResponses((prev) => [...prev, latest]);
+        setMatchedResponses((prev) => [...prev, {
+          method: latest.method || "Unknown Method",
+          displayName: latest.displayName || latest.method || "Unknown",
+          responsePayload: latest.responsePayload,
+          status: latest.status,
+          endpoint: latest.endpoint,
+          timestamp: latest.timestamp,
+          id: latest.id
+        }]);
+        
+        // Mark this request as processed
+        setProcessedRequestIds((prev) => new Set([...prev, latest.id]));
       }
     });
-  }, [httpRows, rules]);
+  }, [httpRows, rules, processedRequestIds]);
 
   return {
     rules,
@@ -78,5 +130,6 @@ export const useRules = (httpRows: any[]) => {
     updateCondition,
     openRuleModal,
     saveRule,
+    clearMatches,
   };
 };

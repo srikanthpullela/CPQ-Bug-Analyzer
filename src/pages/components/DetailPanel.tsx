@@ -113,12 +113,25 @@ export const DetailPanel: React.FC<Props> = ({
   const searchInputRef = useRef<HTMLInputElement>(null);
   const rawJsonContainerRef = useRef<HTMLDivElement>(null);
   const [showEditRequest, setShowEditRequest] = useState(false);
+  // For ApexRemote calls, construct the URL if needed
   const finalUrl = data?.url || (origin ? `${origin}/apexremote` : null);
 
   // const [rawPayloadText, setRawPayloadText] = useState<string>("");
   // const [requestPayloadOverride, setRequestPayloadOverride] = useState<any>({});
 
   const isRequestView = title?.toLowerCase().includes("request");
+  
+  // Check if we have enough data to re-trigger a request
+  const canRetriggerRequest = isRequestView && data && (
+    // For HTTP requests, we need at least a URL or method/endpoint info
+    data.url || 
+    data.method || 
+    data.displayName ||
+    // For ApexRemote calls, we need the constructed finalUrl
+    finalUrl ||
+    // For any request with sufficient payload data
+    (data.requestPayload || data.payload)
+  );
 
   // Try to JSON.parse any string that *looks* like JSON
   function tryParseJSON(str: string): any {
@@ -404,11 +417,11 @@ export const DetailPanel: React.FC<Props> = ({
               </button>
             )}
 
-            {isRequestView && data?.method && finalUrl && (
+            {canRetriggerRequest && onEditRequest && (
               <button
                 onClick={() => {
                   if (onEditRequest) {
-                    onEditRequest(data, data.method);
+                    onEditRequest(data, data.method || data.displayName || 'HTTP Request');
                   }
                 }}
                 className={`inline-flex items-center px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors ${

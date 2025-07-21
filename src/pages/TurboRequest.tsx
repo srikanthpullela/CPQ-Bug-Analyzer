@@ -64,7 +64,9 @@ const TurboRequest: React.FC<TurboRequestProps> = ({
   return (
     <div className="main p-4 space-y-4">
       <div className="flex items-start gap-4">
-        <h2 className="text-2xl font-bold">Turbo Request</h2>
+        <h2 className="text-l font-bold pt-2 whitespace-nowrap">
+          Turbo Request
+        </h2>
         <textarea
           ref={textRef}
           className="w-full h-10 border p-2 flex-1"
@@ -83,8 +85,7 @@ const TurboRequest: React.FC<TurboRequestProps> = ({
 
       {missingPayload && (
         <div className="p-3 bg-yellow-100 border border-yellow-300 text-yellow-800 rounded">
-          ⚠️ No <strong>PayLoad</strong> found
-          in the provided JSON.
+          ⚠️ No <strong>PayLoad</strong> found in the provided JSON.
         </div>
       )}
 

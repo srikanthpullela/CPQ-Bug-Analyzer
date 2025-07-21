@@ -128,7 +128,9 @@ const TurboResponse: React.FC<TurboResponseProps> = ({
   return (
     <div className="main p-4 space-y-4">
       <div className="flex items-start gap-4">
-        <h2 className="text-2xl font-bold">Turbo Response</h2>
+        <h2 className="text-l font-bold pt-2 whitespace-nowrap">
+          Turbo Response
+        </h2>
         <textarea
           ref={textRef}
           className="w-full h-10 border p-2 font-mono flex-1"

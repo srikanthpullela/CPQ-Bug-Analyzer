@@ -39,42 +39,93 @@ const Home: React.FC = () => {
   const [dragStartY, setDragStartY] = useState(0);
   const [initialTopHeight, setInitialTopHeight] = useState(50);
 
-  // Panel drag handlers
+  // Panel drag handlers (supports both mouse and touch)
   const handleMouseDown = (e: React.MouseEvent) => {
+    console.log("Mouse down detected!"); // Debug log
+    e.preventDefault();
+    e.stopPropagation();
+    startDrag(e.clientY);
+  };
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    console.log("Touch start detected!"); // Debug log
+    e.preventDefault();
+    e.stopPropagation();
+    const touch = e.touches[0];
+    startDrag(touch.clientY);
+  };
+
+  const startDrag = (startY: number) => {
+    console.log("Starting drag at Y:", startY); // Debug log
     setIsDragging(true);
-    setDragStartY(e.clientY);
-    const containerHeight = e.currentTarget.parentElement?.clientHeight || 600;
-    const topPanel = e.currentTarget.previousElementSibling as HTMLElement;
-    const currentTopHeight = (topPanel.clientHeight / containerHeight) * 100;
+    setDragStartY(startY);
+    
+    // Get the container and calculate current top height ONCE
+    const container = document.querySelector('.enhanced-panels') as HTMLElement;
+    if (!container) {
+      console.error("Container not found!");
+      return;
+    }
+    
+    const containerHeight = container.clientHeight;
+    const topPanel = container.querySelector('.panel.top') as HTMLElement;
+    const currentTopHeight = topPanel ? (topPanel.clientHeight / containerHeight) * 100 : 50;
     setInitialTopHeight(currentTopHeight);
 
+    console.log("Container height:", containerHeight, "Current top height:", currentTopHeight);
+
+    // Use requestAnimationFrame for smooth updates
+    let animationId: number;
+
+    // Create event handlers with closure over current values
+    const handleMove = (clientY: number) => {
+      // Cancel previous animation frame for smoother updates
+      if (animationId) {
+        cancelAnimationFrame(animationId);
+      }
+
+      animationId = requestAnimationFrame(() => {
+        const deltaY = clientY - startY;
+        const deltaPercent = (deltaY / containerHeight) * 100;
+        let newTopHeight = currentTopHeight + deltaPercent;
+        newTopHeight = Math.max(15, Math.min(85, newTopHeight));
+        const newBottomHeight = 100 - newTopHeight;
+        
+        setPanelHeight({
+          top: `${newTopHeight}%`,
+          bottom: `${newBottomHeight}%`,
+        });
+      });
+    };
+
+    const handleMouseMove = (e: MouseEvent) => {
+      e.preventDefault();
+      handleMove(e.clientY);
+    };
+
+    const handleTouchMove = (e: TouchEvent) => {
+      e.preventDefault();
+      const touch = e.touches[0];
+      handleMove(touch.clientY);
+    };
+
+    const cleanup = () => {
+      console.log("Cleaning up drag"); // Debug log
+      if (animationId) {
+        cancelAnimationFrame(animationId);
+      }
+      setIsDragging(false);
+      document.removeEventListener("mousemove", handleMouseMove);
+      document.removeEventListener("mouseup", cleanup);
+      document.removeEventListener("touchmove", handleTouchMove);
+      document.removeEventListener("touchend", cleanup);
+    };
+
+    // Add event listeners
     document.addEventListener("mousemove", handleMouseMove);
-    document.addEventListener("mouseup", handleMouseUp);
-    e.preventDefault();
-  };
-
-  const handleMouseMove = (e: MouseEvent) => {
-    if (!isDragging) return;
-
-    const deltaY = e.clientY - dragStartY;
-    const containerHeight = 600; // approximate container height
-    const deltaPercent = (deltaY / containerHeight) * 100;
-
-    let newTopHeight = initialTopHeight + deltaPercent;
-    newTopHeight = Math.max(20, Math.min(80, newTopHeight)); // Constrain between 20% and 80%
-
-    const newBottomHeight = 100 - newTopHeight;
-
-    setPanelHeight({
-      top: `${newTopHeight}%`,
-      bottom: `${newBottomHeight}%`,
-    });
-  };
-
-  const handleMouseUp = () => {
-    setIsDragging(false);
-    document.removeEventListener("mousemove", handleMouseMove);
-    document.removeEventListener("mouseup", handleMouseUp);
+    document.addEventListener("mouseup", cleanup);
+    document.addEventListener("touchmove", handleTouchMove, { passive: false });
+    document.addEventListener("touchend", cleanup);
   };
 
   const onSyncChange = (checked: boolean) => {
@@ -106,109 +157,115 @@ const Home: React.FC = () => {
   const RightComp = pageMap[rightPage];
 
   useEffect(() => {
+    // Cleanup function in case component unmounts during drag
     return () => {
-      document.removeEventListener("mousemove", handleMouseMove);
-      document.removeEventListener("mouseup", handleMouseUp);
+      setIsDragging(false);
     };
   }, []);
 
   return (
     <div className="sfdc-root">
       <header className="sfdc-header enhanced-header">
-        <div className="header-section page-selectors">
-          <select
-            value={leftPage}
-            onChange={(e) => setLeftPage(e.target.value)}
-            className="sfdc-btn enhanced-select"
-          >
-            {pageKeys.map((k) => (
-              <option key={k} value={k}>
-                {k}
-              </option>
-            ))}
-          </select>
-          <span className="vs-separator">vs</span>
-          <select
-            value={rightPage}
-            onChange={(e) => setRightPage(e.target.value)}
-            className="sfdc-btn enhanced-select"
-          >
-            {pageKeys.map((k) => (
-              <option key={k} value={k}>
-                {k}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="header-section tool-buttons">
-          <Link to="/formatter" className="btn enhanced-btn">
-            <span className="btn-icon">{"{ }"}</span>
-            <span className="btn-text">Prettify</span>
-          </Link>
-
-          <Link to="/compare" className="btn enhanced-btn">
-            <span className="btn-icon">{"⚖"}</span>
-            <span className="btn-text">Compare</span>
-          </Link>
-
-          <Link to="/har" className="btn enhanced-btn">
-            <span className="btn-icon">{"📊"}</span>
-            <span className="btn-text">HAR</span>
-          </Link>
-
-          <Link to="/log" className="btn enhanced-btn">
-            <span className="btn-icon">{"📋"}</span>
-            <span className="btn-text">Log Analyzer</span>
-          </Link>
-        </div>
-
-        <div className="header-section controls">
-          <div className="filter-container">
-            <input
-              type="text"
-              placeholder="Global filter..."
-              value={filterText}
-              onChange={(e) => setFilterText(e.target.value)}
-              className="sfdc-filter enhanced-filter"
-            />
-            <span className="filter-icon">🔍</span>
+        <div className="header-row">
+          <div className="header-section page-selectors">
+            <select
+              value={leftPage}
+              onChange={(e) => setLeftPage(e.target.value)}
+              className="sfdc-btn enhanced-select"
+            >
+              {pageKeys.map((k) => (
+                <option key={k} value={k}>
+                  {k}
+                </option>
+              ))}
+            </select>
+            <span className="vs-separator">vs</span>
+            <select
+              value={rightPage}
+              onChange={(e) => setRightPage(e.target.value)}
+              className="sfdc-btn enhanced-select"
+            >
+              {pageKeys.map((k) => (
+                <option key={k} value={k}>
+                  {k}
+                </option>
+              ))}
+            </select>
           </div>
 
-          <label className="sync-label enhanced-sync">
-            <input
-              type="checkbox"
-              checked={sync}
-              onChange={(e) => onSyncChange(e.target.checked)}
-              className="sync-checkbox"
-            />
-            <span className="sync-slider"></span>
-            <span className="sync-text">Sync fields</span>
-          </label>
-        </div>
+          <div className="header-section tool-buttons">
+            <Link to="/formatter" className="btn enhanced-btn">
+              <span className="btn-icon">{"{ }"}</span>
+              <span className="btn-text">Prettify</span>
+            </Link>
 
-        <nav className="sfdc-nav enhanced-nav">
-          <Link to="/" className="nav-link">
-            Home
-          </Link>
-          <span className="nav-separator">|</span>
-          <Link to="/sfdc" className="nav-link">
-            SFDC
-          </Link>
-          <span className="nav-separator">|</span>
-          <Link to="/turbo" className="nav-link">
-            Turbo
-          </Link>
-        </nav>
+            <Link to="/compare" className="btn enhanced-btn">
+              <span className="btn-icon">{"⚖"}</span>
+              <span className="btn-text">Compare</span>
+            </Link>
+
+            <Link to="/har" className="btn enhanced-btn">
+              <span className="btn-icon">{"📊"}</span>
+              <span className="btn-text">HAR</span>
+            </Link>
+
+            <Link to="/log" className="btn enhanced-btn">
+              <span className="btn-icon">{"📋"}</span>
+              <span className="btn-text">Log</span>
+            </Link>
+          </div>
+
+          <div className="header-section controls">
+            <div className="filter-container">
+              <input
+                type="text"
+                placeholder="Filter..."
+                value={filterText}
+                onChange={(e) => setFilterText(e.target.value)}
+                className="sfdc-filter enhanced-filter"
+              />
+              <span className="filter-icon">🔍</span>
+            </div>
+
+            <label className="sync-label enhanced-sync">
+              <input
+                type="checkbox"
+                checked={sync}
+                onChange={(e) => onSyncChange(e.target.checked)}
+                className="sync-checkbox"
+              />
+              <span className="sync-slider"></span>
+              <span className="sync-text">Sync</span>
+            </label>
+          </div>
+
+          <nav className="sfdc-nav enhanced-nav">
+            <Link to="/" className="nav-link">
+              Home
+            </Link>
+            <span className="nav-separator">|</span>
+            <Link to="/sfdc" className="nav-link">
+              SFDC
+            </Link>
+            <span className="nav-separator">|</span>
+            <Link to="/turbo" className="nav-link">
+              Turbo
+            </Link>
+          </nav>
+        </div>
       </header>
 
       <div
-        className="sfdc-panels enhanced-panels"
-        style={{ flexDirection: "column", height: "calc(100vh - 120px)" }}
+        className={`sfdc-panels enhanced-panels ${isDragging ? 'dragging' : ''}`}
+        style={{ flexDirection: "column", height: "calc(100vh - 100px)" }}
       >
         <section
           className="panel top half enhanced-panel"
-          style={{ height: panelHeight.top, minHeight: "200px" }}
+          style={{ 
+            height: panelHeight.top, 
+            minHeight: "150px",
+            transition: isDragging ? "none" : "height 0.2s ease-out"
+          }}
         >
           <div className="panel-header">
             <h3 className="panel-title">{leftPage}</h3>
@@ -223,18 +280,26 @@ const Home: React.FC = () => {
           </div>
         </section>
 
-        {/* <div
+        <div
           className="panel-divider draggable-divider"
           onMouseDown={handleMouseDown}
-          style={{ cursor: isDragging ? "ns-resize" : "ns-resize" }}
+          onTouchStart={handleTouchStart}
+          style={{ 
+            cursor: isDragging ? "ns-resize" : "ns-resize",
+            backgroundColor: isDragging ? "rgba(102, 126, 234, 0.2)" : "transparent"
+          }}
         >
           <div className="divider-line"></div>
           <div className="divider-handle">⋮⋮⋮</div>
-        </div> */}
+        </div>
 
         <section
           className="panel bottom half enhanced-panel"
-          style={{ height: panelHeight.bottom, minHeight: "200px" }}
+          style={{ 
+            height: panelHeight.bottom, 
+            minHeight: "150px",
+            transition: isDragging ? "none" : "height 0.2s ease-out"
+          }}
         >
           <div className="panel-header">
             <h3 className="panel-title">{rightPage}</h3>

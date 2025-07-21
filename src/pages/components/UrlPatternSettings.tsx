@@ -39,33 +39,30 @@ export const UrlPatternSettings: React.FC<Props> = ({ isDarkMode = false, onClos
   ];
 
   useEffect(() => {
-    // Try to get patterns from localStorage first
+    // Simply read from localStorage without any filtering or modification
     try {
       const stored = localStorage.getItem('har_extractor_url_patterns');
       if (stored) {
         const localPatterns = JSON.parse(stored);
-        // Apply strict filtering to ensure only ApexRemote and CongaCloud
-        const allowedPatterns = ['apexremote', 'congacloud'];
-        const filteredPatterns = localPatterns.filter((p: UrlPattern) => {
-          return allowedPatterns.includes(p.pattern.toLowerCase()) && 
-                 (p.name.toLowerCase() === 'apexremote' || p.name.toLowerCase() === 'congacloud');
-        });
+        console.log('📖 Loading patterns from localStorage:', localPatterns);
         
-        if (filteredPatterns.length > 0) {
-          setPatterns(filteredPatterns);
-        } else {
-          // No valid patterns, use defaults
-          setPatterns(getDefaultPatterns());
+        // Use exactly what's in localStorage - no filtering
+        if (Array.isArray(localPatterns) && localPatterns.length > 0) {
+          setPatterns(localPatterns);
+          setIsLoading(false);
+          return;
         }
-        setIsLoading(false);
-        return;
       }
+      
+      console.log('📝 No patterns found in localStorage, setting defaults');
     } catch (error) {
-      console.warn('Error reading patterns from localStorage:', error);
+      console.warn('⚠️ Error reading patterns from localStorage:', error);
     }
 
-    // No localStorage data, use defaults
-    setPatterns(getDefaultPatterns());
+    // No localStorage data or error, use defaults
+    const defaults = getDefaultPatterns();
+    console.log('Setting default patterns:', defaults);
+    setPatterns(defaults);
     setIsLoading(false);
   }, []);
 
@@ -73,35 +70,45 @@ export const UrlPatternSettings: React.FC<Props> = ({ isDarkMode = false, onClos
     setIsSaving(true);
     
     try {
-      // Apply strict filtering before saving
-      const allowedPatterns = ['apexremote', 'congacloud'];
-      const filteredPatterns = patterns.filter((p) => {
-        return allowedPatterns.includes(p.pattern.toLowerCase()) && 
-               (p.name.toLowerCase() === 'apexremote' || p.name.toLowerCase() === 'congacloud');
-      });
+      // Simply save what the user has configured - no filtering or modification
+      const patternsToSave = patterns.map(p => ({
+        name: p.name || 'Unnamed Pattern',
+        pattern: p.pattern || '',
+        type: p.type || 'generic',
+        enabled: p.enabled !== false, // default to true
+        description: p.description || ''
+      }));
       
-      // Save to localStorage (primary storage)
-      localStorage.setItem('har_extractor_url_patterns', JSON.stringify(filteredPatterns));
-      console.log('Successfully saved patterns to localStorage');
+      console.log('Saving patterns to localStorage:', patternsToSave);
       
-      // Also try to notify devtools (best effort)
-      window.postMessage({ 
-        source: "HAR_EXTRACTOR", 
-        type: "SAVE_URL_PATTERNS", 
-        patterns: filteredPatterns 
-      }, "*");
+      // Save directly to localStorage
+      localStorage.setItem('har_extractor_url_patterns', JSON.stringify(patternsToSave));
       
-      // Wait a moment for user feedback, then complete
-      await new Promise(resolve => setTimeout(resolve, 500));
-      
-      setIsSaving(false);
-      toast.success('URL patterns saved successfully!');
-      onClose();
+      // Verify the save was successful by reading it back immediately
+      const verification = localStorage.getItem('har_extractor_url_patterns');
+      if (verification) {
+        const parsed = JSON.parse(verification);
+        console.log('✅ Verification: Successfully saved and confirmed in localStorage:', parsed);
+        
+        // Update our state to match exactly what was saved
+        setPatterns(parsed);
+        
+        setIsSaving(false);
+        toast.success(`✅ Patterns saved successfully! (${parsed.length} patterns)`);
+        
+        // Small delay for user feedback, then close
+        setTimeout(() => {
+          onClose();
+        }, 1000);
+        
+      } else {
+        throw new Error('Failed to verify localStorage save - data not found');
+      }
       
     } catch (error) {
-      console.error('Error saving patterns:', error);
+      console.error('❌ Error saving patterns:', error);
       setIsSaving(false);
-      toast.error('Error saving patterns. Please try again.');
+      toast.error('❌ Error saving patterns. Please try again.');
     }
   };
 
@@ -113,19 +120,12 @@ export const UrlPatternSettings: React.FC<Props> = ({ isDarkMode = false, onClos
       // Save to localStorage immediately
       try {
         localStorage.setItem('har_extractor_url_patterns', JSON.stringify(defaults));
-        console.log('Reset to defaults and saved to localStorage');
-        toast.success('Patterns reset to defaults');
+        console.log('✅ Reset to defaults and saved to localStorage:', defaults);
+        toast.success('✅ Patterns reset to defaults and saved!');
       } catch (error) {
-        console.error('Error saving defaults to localStorage:', error);
-        toast.error('Error resetting patterns');
+        console.error('❌ Error saving defaults to localStorage:', error);
+        toast.error('❌ Error resetting patterns');
       }
-      
-      // Notify devtools (best effort)
-      window.postMessage({ 
-        source: "HAR_EXTRACTOR", 
-        type: "SAVE_URL_PATTERNS", 
-        patterns: defaults 
-      }, "*");
     }
   };
 
@@ -136,28 +136,16 @@ export const UrlPatternSettings: React.FC<Props> = ({ isDarkMode = false, onClos
       // Clear localStorage immediately
       try {
         localStorage.removeItem('har_extractor_url_patterns');
-        console.log('Cleared all patterns from localStorage');
-        toast.success('All patterns cleared');
+        console.log('✅ Cleared all patterns from localStorage');
+        toast.success('✅ All patterns cleared!');
       } catch (error) {
-        console.error('Error clearing localStorage:', error);
-        toast.error('Error clearing patterns');
+        console.error('❌ Error clearing localStorage:', error);
+        toast.error('❌ Error clearing patterns');
       }
-      
-      // Notify devtools (best effort)
-      window.postMessage({ 
-        source: "HAR_EXTRACTOR", 
-        type: "SAVE_URL_PATTERNS", 
-        patterns: [] 
-      }, "*");
     }
   };
 
   const addNewPattern = () => {
-    // Show a warning about restricted patterns
-    if (!confirm('Note: Only ApexRemote and CongaCloud patterns are supported. Other patterns will be filtered out when saving. Continue?')) {
-      return;
-    }
-    
     const newPattern: UrlPattern = {
       name: "New Pattern",
       pattern: "",
@@ -413,13 +401,12 @@ export const UrlPatternSettings: React.FC<Props> = ({ isDarkMode = false, onClos
         <div
           className={`mt-4 p-3 rounded text-sm ${
             isDarkMode
-              ? "bg-yellow-900 text-yellow-200 border border-yellow-700"
-              : "bg-yellow-50 text-yellow-800 border border-yellow-200"
+              ? "bg-green-900 text-green-200 border border-green-700"
+              : "bg-green-50 text-green-800 border border-green-200"
           }`}
         >
-          <strong>⚠️ Important:</strong> This extension only supports ApexRemote and CongaCloud patterns. 
-          Other patterns (including Salesforce.com, Force.com, etc.) will be automatically filtered out 
-          for security and performance reasons.
+          <strong>✅ Simple Storage:</strong> Your patterns are saved directly to browser localStorage. 
+          Changes are saved exactly as you configure them and will persist when you reopen DevTools.
         </div>
 
         <div

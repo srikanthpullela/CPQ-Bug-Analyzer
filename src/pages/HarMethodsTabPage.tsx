@@ -85,7 +85,7 @@ const HarMethodsTabPage: React.FC = () => {
   useEffect(() => {
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, []);
+  }, [rulesHook]);
 
   const onMessage = (event: MessageEvent) => {
     if (event.data?.source !== "HAR_EXTRACTOR") return;
@@ -95,6 +95,8 @@ const HarMethodsTabPage: React.FC = () => {
       setPanelData(null);
       setPanelTitle("");
       setSelectedRowKey(null);
+      // Also clear rule matches when logs are cleared
+      rulesHook.clearMatches();
       console.warn(
         "CLEAR received but httpRows/wsRows can't be cleared directly!"
       );
@@ -299,6 +301,7 @@ const HarMethodsTabPage: React.FC = () => {
         open={rulesHook.showMatchesModal}
         matchedResponses={rulesHook.matchedResponses}
         onClose={() => rulesHook.setShowMatchesModal(false)}
+        onClearMatches={rulesHook.clearMatches}
         isDarkMode={isDarkMode}
       />
 
