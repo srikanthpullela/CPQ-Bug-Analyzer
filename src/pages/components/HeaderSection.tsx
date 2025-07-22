@@ -196,12 +196,17 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
 
           <button
             className={`p-2 rounded-md transition-colors flex ${
-              isDarkMode
-                ? "bg-red-700 hover:bg-red-600 text-white"
-                : "bg-red-600 hover:bg-red-700 text-white"
+              matchCount > 0
+                ? isDarkMode
+                  ? "bg-red-700 hover:bg-red-600 text-white"
+                  : "bg-red-600 hover:bg-red-700 text-white"
+                : isDarkMode
+                  ? "bg-gray-600 text-gray-400 cursor-not-allowed"
+                  : "bg-gray-300 text-gray-500 cursor-not-allowed"
             }`}
-            onClick={() => setShowMatchesModal(true)}
-            title="View rule matches"
+            onClick={() => matchCount > 0 && setShowMatchesModal(true)}
+            disabled={matchCount === 0}
+            title={matchCount > 0 ? "View rule matches" : "No rule matches available"}
           >
             <BellRing className="h-4 w-4" />
             <span className="ml-1 text-xs">{matchCount}</span>

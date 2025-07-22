@@ -1,4 +1,5 @@
 // src/components/UrlPatternSettings.tsx
+import { X } from 'lucide-react';
 import React, { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
 
@@ -181,7 +182,7 @@ export const UrlPatternSettings: React.FC<Props> = ({ isDarkMode = false, onClos
               onClick={onClose}
               className={`text-gray-400 hover:text-gray-600 text-2xl leading-none ml-4`}
             >
-              ×
+              <X size={20} />
             </button>
           </div>
           <div className="text-center">

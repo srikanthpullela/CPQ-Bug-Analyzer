@@ -20,6 +20,7 @@ import HarQueryComponent from "./HarQueryComponent";
 import { toast, Toaster } from "react-hot-toast";
 import { useRules } from "../hooks/useRules";
 import { useEditModal } from "../hooks/useEditModal";
+import { ClearLogsConfirmationModal } from "./components/ClearLogsConfirmationModal";
 
 const HarMethodsTabPage: React.FC = () => {
   const { httpRows, wsRows, wsBaseUrl } = useLiveHar();
@@ -36,6 +37,7 @@ const HarMethodsTabPage: React.FC = () => {
   const [queryModalOpen, setQueryModalOpen] = useState(false);
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
   const [urlPatternSettingsOpen, setUrlPatternSettingsOpen] = useState(false);
+  const [showClearConfirmation, setShowClearConfirmation] = useState(false);
 
   // Dark mode state
   const [isDarkMode, setIsDarkMode] = useState(() => {
@@ -46,8 +48,8 @@ const HarMethodsTabPage: React.FC = () => {
     return false;
   });
 
-  // Custom hooks
-  const rulesHook = useRules(httpRows);
+  // Custom hooks - pass both httpRows and wsRows to useRules
+  const rulesHook = useRules(httpRows, wsRows);
   const editModalHook = useEditModal(origin);
 
   function extractUniqueKeys(rows: any[]): string[] {
@@ -101,6 +103,8 @@ const HarMethodsTabPage: React.FC = () => {
         "CLEAR received but httpRows/wsRows can't be cleared directly!"
       );
     }
+
+    // Remove the manual rule checking trigger - now handled automatically by useEffect
   };
 
   // Dark mode effect
@@ -141,6 +145,10 @@ const HarMethodsTabPage: React.FC = () => {
   };
 
   const requestClearLogs = () => {
+    setShowClearConfirmation(true);
+  };
+
+  const confirmClearLogs = () => {
     console.log("[HarMethodsTabPage] Requesting to clear logs via devtools.ts");
     window.postMessage(
       {
@@ -149,6 +157,13 @@ const HarMethodsTabPage: React.FC = () => {
       },
       "*"
     );
+    setShowClearConfirmation(false);
+    
+    // Show success toast
+    toast.success("Network logs cleared successfully", {
+      duration: 3000,
+      position: 'top-right',
+    });
   };
 
   const openPanel = (title: string, data: any) => {
@@ -190,42 +205,52 @@ const HarMethodsTabPage: React.FC = () => {
         minLeftWidth={25}
         maxLeftWidth={75}
         leftPanel={
-          <div className="p-2 space-y-2 h-full overflow-auto">
-            {/* Header Section */}
-            <HeaderSection
-              isDarkMode={isDarkMode}
-              totalRequests={totalRequests}
-              httpRowsLength={httpRows.length}
-              wsRowsLength={wsRows.length}
-              searchTerm={searchTerm}
-              filteredHttpCount={filteredHttpCount}
-              filteredWsCount={filteredWsCount}
-              wsBaseUrl={wsBaseUrl}
-              matchCount={rulesHook.matchCount}
-              rules={rulesHook.rules}
-              toggleDarkMode={toggleDarkMode}
-              requestHarReload={requestHarReload}
-              setHistoryModalOpen={setHistoryModalOpen}
-              setQueryModalOpen={setQueryModalOpen}
-              requestClearLogs={requestClearLogs}
-              openRuleModal={rulesHook.openRuleModal}
-              setShowMatchesModal={rulesHook.setShowMatchesModal}
-              setSearchTerm={setSearchTerm}
-              openUrlPatternSettings={() => setUrlPatternSettingsOpen(true)}
-            />
-            <Toaster position="top-right" />
+          <div className="h-full flex flex-col">
+            {/* Sticky Header Section */}
+            <div className="sticky top-0 z-10 bg-inherit border-b border-gray-200 dark:border-gray-700">
+              <div className="p-2">
+                <HeaderSection
+                  isDarkMode={isDarkMode}
+                  totalRequests={totalRequests}
+                  httpRowsLength={httpRows.length}
+                  wsRowsLength={wsRows.length}
+                  searchTerm={searchTerm}
+                  filteredHttpCount={filteredHttpCount}
+                  filteredWsCount={filteredWsCount}
+                  wsBaseUrl={wsBaseUrl}
+                  matchCount={rulesHook.matchCount}
+                  rules={rulesHook.rules}
+                  toggleDarkMode={toggleDarkMode}
+                  requestHarReload={requestHarReload}
+                  setHistoryModalOpen={setHistoryModalOpen}
+                  setQueryModalOpen={setQueryModalOpen}
+                  requestClearLogs={requestClearLogs}
+                  openRuleModal={rulesHook.openRuleModal}
+                  setShowMatchesModal={rulesHook.setShowMatchesModal}
+                  setSearchTerm={setSearchTerm}
+                  openUrlPatternSettings={() => setUrlPatternSettingsOpen(true)}
+                />
+              </div>
+            </div>
 
-            {/* Tables Section */}
-            <NetworkTables
-              httpRows={httpRows}
-              wsRows={wsRows}
-              wsBaseUrl={wsBaseUrl}
-              searchTerm={searchTerm}
-              selectedRowKey={selectedRowKey}
-              isDarkMode={isDarkMode}
-              requestHarReload={requestHarReload}
-              onView={handleView}
-            />
+            {/* Scrollable Content Area */}
+            <div className="flex-1 overflow-auto">
+              <div className="p-2 space-y-2">
+                <Toaster position="top-right" />
+
+                {/* Tables Section */}
+                <NetworkTables
+                  httpRows={httpRows}
+                  wsRows={wsRows}
+                  wsBaseUrl={wsBaseUrl}
+                  searchTerm={searchTerm}
+                  selectedRowKey={selectedRowKey}
+                  isDarkMode={isDarkMode}
+                  requestHarReload={requestHarReload}
+                  onView={handleView}
+                />
+              </div>
+            </div>
           </div>
         }
         rightPanel={
@@ -234,7 +259,9 @@ const HarMethodsTabPage: React.FC = () => {
             title={panelTitle}
             data={panelData}
             viewTree={viewTree}
-            onCopy={() => safeCopyToClipboard(JSON.stringify(panelData, null, 2))}
+            onCopy={() =>
+              safeCopyToClipboard(JSON.stringify(panelData, null, 2))
+            }
             onClose={() => {
               setPanelOpen(false);
               setSelectedRowKey(null);
@@ -278,6 +305,7 @@ const HarMethodsTabPage: React.FC = () => {
               httpRows={httpRows}
               wsRows={wsRows}
               onClose={() => setQueryModalOpen(false)}
+              isDarkMode={isDarkMode}
             />
           </div>
         </div>
@@ -297,13 +325,15 @@ const HarMethodsTabPage: React.FC = () => {
       />
 
       {/* Matches Modal */}
-      <MatchesModal
-        open={rulesHook.showMatchesModal}
-        matchedResponses={rulesHook.matchedResponses}
-        onClose={() => rulesHook.setShowMatchesModal(false)}
-        onClearMatches={rulesHook.clearMatches}
-        isDarkMode={isDarkMode}
-      />
+      {rulesHook.showMatchesModal && rulesHook.matchedResponses.length > 0 && (
+        <MatchesModal
+          open={rulesHook.showMatchesModal}
+          matchedResponses={rulesHook.matchedResponses}
+          onClose={() => rulesHook.setShowMatchesModal(false)}
+          onClearMatches={rulesHook.clearMatches}
+          isDarkMode={isDarkMode}
+        />
+      )}
 
       {/* Edit Modal */}
       <EditModal
@@ -326,6 +356,14 @@ const HarMethodsTabPage: React.FC = () => {
           onClose={() => setUrlPatternSettingsOpen(false)}
         />
       )}
+
+      {/* Clear Logs Confirmation Modal */}
+      <ClearLogsConfirmationModal
+        open={showClearConfirmation}
+        onClose={() => setShowClearConfirmation(false)}
+        onConfirm={confirmClearLogs}
+        isDarkMode={isDarkMode}
+      />
 
       <style>{`
         .search-input-light {

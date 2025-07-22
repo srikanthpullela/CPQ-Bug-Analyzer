@@ -284,6 +284,7 @@ export function useLiveHar() {
             try {
               const stored = localStorage.getItem('har_extractor_url_patterns');
               urlPatterns = stored ? JSON.parse(stored) : [];
+              console.log("[useLiveHar] Loaded URL patterns:", urlPatterns);
             } catch (error) {
               console.warn('Error reading URL patterns:', error);
               // Fallback to basic default patterns only
@@ -293,14 +294,25 @@ export function useLiveHar() {
               ];
             }
 
-            // STRICT FILTERING: Only allow ApexRemote and CongaCloud patterns
-            const allowedPatterns = ['apexremote', 'congacloud'];
+            // More flexible filtering: Allow any pattern that contains the keywords
+            const allowedKeywords = ['apexremote', 'conga'];
             const filteredPatterns = urlPatterns.filter(p => {
-              return allowedPatterns.includes(p.pattern.toLowerCase()) && 
-                     (p.name.toLowerCase() === 'apexremote' || p.name.toLowerCase() === 'congacloud');
+              if (!p.enabled) return false;
+              const patternLower = p.pattern.toLowerCase();
+              const nameLower = (p.name || '').toLowerCase();
+              return allowedKeywords.some(keyword => 
+                patternLower.includes(keyword) || nameLower.includes(keyword)
+              );
             });
             
-            const enabledPatterns = filteredPatterns.filter(p => p.enabled);
+            // Ensure we have default patterns if none are configured
+            const enabledPatterns = filteredPatterns.length > 0 ? filteredPatterns : [
+              { pattern: 'apexremote', enabled: true, type: 'apex', name: 'ApexRemote' },
+              { pattern: 'congacloud', enabled: true, type: 'http', name: 'CongaCloud' },
+              { pattern: 'conga', enabled: true, type: 'http', name: 'Conga' }
+            ];
+            
+            console.log("[useLiveHar] Using patterns for filtering:", enabledPatterns);
             
             // Filter out static assets with comprehensive patterns
             const staticAssetExtensions = [
@@ -315,104 +327,143 @@ export function useLiveHar() {
             ];
             
             const entries = (harLog.entries || []).filter(entry => {
+              const url = entry.request.url.toLowerCase();
+              
               // First check if it's a static asset
               const isStaticAsset = staticAssetExtensions.some(ext => 
-                entry.request.url.toLowerCase().includes(ext.toLowerCase())
+                url.includes(ext.toLowerCase())
               );
               
               if (isStaticAsset) {
                 return false;
               }
               
-              // Then check if it matches any enabled pattern
-              return enabledPatterns.some(pattern => 
-                entry.request.url.includes(pattern.pattern)
-              );
+              // Then check if it matches any enabled pattern (case-insensitive and more flexible)
+              const matchesPattern = enabledPatterns.some(pattern => {
+                const patternLower = pattern.pattern.toLowerCase();
+                const matches = url.includes(patternLower);
+                if (matches) {
+                  console.log(`[useLiveHar] URL "${entry.request.url}" matches pattern "${pattern.pattern}"`);
+                }
+                return matches;
+              });
+              
+              return matchesPattern;
             });
 
+            console.log(`[useLiveHar] Found ${entries.length} entries matching patterns out of ${harLog.entries?.length || 0} total entries`);
+            
             if (!entries.length) {
               console.warn("[useLiveHar] No matching entries found for configured patterns");
+              console.log("[useLiveHar] Sample URLs from HAR:", harLog.entries?.slice(0, 10).map(e => e.request.url));
               return;
             }
 
             const freshRows: HttpRow[] = [];
             let completed = 0;
+            let failed = 0;
 
-            entries.forEach((entry) => {
-              const start = new Date(entry.startedDateTime);
-              const time = formatTime(start);
-              const startTime = start.getTime();
-              const totalTime = entry.time || 0;
-              const endTime = startTime + totalTime;
-
-              // Find which pattern matched this URL
-              const matchedPattern = enabledPatterns.find(p => 
-                entry.request.url.includes(p.pattern)
-              );
-
-              let req = {};
+            // Process entries with better error handling
+            const processEntry = (entry: any, index: number) => {
               try {
-                req = JSON.parse(entry.request.postData?.text || "{}");
-              } catch {}
+                const start = new Date(entry.startedDateTime);
+                const time = formatTime(start);
+                const startTime = start.getTime();
+                const totalTime = entry.time || 0;
+                const endTime = startTime + totalTime;
 
-              entry.getContent((content) => {
-                let res = {};
+                // Find which pattern matched this URL
+                const matchedPattern = enabledPatterns.find(p => 
+                  entry.request.url.toLowerCase().includes(p.pattern.toLowerCase())
+                );
+
+                let req = {};
                 try {
-                  res = JSON.parse(content || "{}");
-                } catch {}
+                  req = JSON.parse(entry.request.postData?.text || "{}");
+                } catch (e) {
+                  console.debug(`[useLiveHar] Failed to parse request for entry ${index}:`, e);
+                }
 
-                // Process based on pattern type (similar to devtools.ts logic)
-                let method, urlPattern, patternType, httpMethod, endpoint;
-                const requestHttpMethod = entry.request.method || 'GET';
-                
-                // For OPTIONS or non-standard responses, show the full response object
-                const shouldShowFullResponse = requestHttpMethod === 'OPTIONS' || 
-                  (res && typeof res === 'object' && !res.hasOwnProperty('result') && 
-                   !Array.isArray(res) && Object.keys(res).length > 0);
-                
-                if (matchedPattern) {
-                  urlPattern = matchedPattern.name || matchedPattern.pattern;
-                  patternType = matchedPattern.type || 'generic';
-                  httpMethod = requestHttpMethod;
+                // Use a timeout for getContent to avoid hanging
+                const timeoutId = setTimeout(() => {
+                  console.warn(`[useLiveHar] Timeout getting content for entry ${index}`);
+                  failed++;
+                  completed++;
+                  checkCompletion();
+                }, 5000);
+
+                entry.getContent((content: string) => {
+                  clearTimeout(timeoutId);
                   
-                  if (patternType === 'apex') {
-                    method = (req as any).method || "(unknown)";
-                  } else if (patternType === 'http') {
-                    endpoint = extractEndpointFromUrl(entry.request.url);
-                    method = `${requestHttpMethod} ${endpoint}`;
+                  let res = {};
+                  try {
+                    res = JSON.parse(content || "{}");
+                  } catch (e) {
+                    console.debug(`[useLiveHar] Failed to parse response for entry ${index}:`, e);
+                    // For non-JSON responses, store the raw content
+                    res = { _rawContent: content };
+                  }
+
+                  // Process based on pattern type
+                  let method, urlPattern, patternType, httpMethod, endpoint;
+                  const requestHttpMethod = entry.request.method || 'GET';
+                  
+                  if (matchedPattern) {
+                    urlPattern = matchedPattern.name || matchedPattern.pattern;
+                    patternType = matchedPattern.type || 'generic';
+                    httpMethod = requestHttpMethod;
+                    
+                    if (patternType === 'apex') {
+                      method = (req as any).method || "(unknown)";
+                    } else if (patternType === 'http') {
+                      endpoint = extractEndpointFromUrl(entry.request.url);
+                      method = `${requestHttpMethod} ${endpoint}`;
+                    } else {
+                      method = (req as any).method || requestHttpMethod || "(unknown)";
+                    }
                   } else {
                     method = (req as any).method || requestHttpMethod || "(unknown)";
+                    patternType = 'generic';
+                    httpMethod = requestHttpMethod;
                   }
-                } else {
-                  method = (req as any).method || "(unknown)";
-                  patternType = 'generic';
-                  httpMethod = requestHttpMethod;
-                }
 
-                freshRows.push({
-                  method,
-                  requestPayload: req,
-                  responsePayload: shouldShowFullResponse ? res : res,
-                  status: entry.response.status ?? null,
-                  time,
-                  startTime,
-                  endTime,
-                  id: uuidv4(),
-                  urlPattern,
-                  patternType: patternType as 'apex' | 'http' | 'generic',
-                  httpMethod,
-                  endpoint,
+                  freshRows.push({
+                    method,
+                    requestPayload: req,
+                    responsePayload: res,
+                    status: entry.response.status ?? null,
+                    time,
+                    startTime,
+                    endTime,
+                    id: uuidv4(),
+                    urlPattern,
+                    patternType: patternType as 'apex' | 'http' | 'generic',
+                    httpMethod,
+                    endpoint,
+                  });
+
+                  completed++;
+                  checkCompletion();
                 });
-
+              } catch (error) {
+                console.error(`[useLiveHar] Error processing entry ${index}:`, error);
+                failed++;
                 completed++;
-                if (completed === entries.length) {
-                  console.log(
-                    `[useLiveHar] Reloaded ${freshRows.length} calls`
-                  );
-                  setHttpRows(freshRows);
-                }
-              });
-            });
+                checkCompletion();
+              }
+            };
+
+            const checkCompletion = () => {
+              if (completed === entries.length) {
+                console.log(`[useLiveHar] Completed processing: ${freshRows.length} successful, ${failed} failed`);
+                // Sort by start time before setting
+                freshRows.sort((a, b) => a.startTime - b.startTime);
+                setHttpRows(freshRows);
+              }
+            };
+
+            // Process all entries
+            entries.forEach(processEntry);
           });
           break;
         case "HAR_RETRIGGER":

@@ -1,8 +1,36 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { toast } from "react-hot-toast";
-import { deepEvaluateRule } from "../utils/RulesHelper";
 
-export const useRules = (httpRows: any[]) => {
+// Helper function to find all occurrences of a field with a specific value
+const findFieldOccurrences = (
+  obj: any,
+  fieldPath: string,
+  expectedValue: any,
+  path: string = ""
+): string[] => {
+  const occurrences: string[] = [];
+
+  if (!obj || typeof obj !== "object") return occurrences;
+
+  // Check direct property match
+  if (obj.hasOwnProperty(fieldPath) && obj[fieldPath] == expectedValue) { // Use == for loose comparison
+    occurrences.push(path || "root");
+  }
+
+  // Recursively check nested objects and arrays
+  Object.keys(obj).forEach((key) => {
+    const newPath = path ? `${path}.${key}` : key;
+    const value = obj[key];
+
+    if (typeof value === "object" && value !== null) {
+      occurrences.push(...findFieldOccurrences(value, fieldPath, expectedValue, newPath));
+    }
+  });
+
+  return occurrences;
+};
+
+export const useRules = (httpRows: any[], wsRows: any[] = []) => {
   const [rules, setRules] = useState([]);
   const [ruleModalOpen, setRuleModalOpen] = useState(false);
   const [newConditions, setNewConditions] = useState([
@@ -12,7 +40,7 @@ export const useRules = (httpRows: any[]) => {
   const [matchCount, setMatchCount] = useState(0);
   const [matchedResponses, setMatchedResponses] = useState([]);
   const [showMatchesModal, setShowMatchesModal] = useState(false);
-  const [processedRequestIds, setProcessedRequestIds] = useState(new Set());
+  const [processedItems, setProcessedItems] = useState<Set<string>>(new Set());
 
   const addCondition = () =>
     setNewConditions([
@@ -50,70 +78,159 @@ export const useRules = (httpRows: any[]) => {
     ]);
     setRuleModalOpen(false);
     // Clear processed IDs when rules change
-    setProcessedRequestIds(new Set());
+    setProcessedItems(new Set());
     setMatchedResponses([]);
     setMatchCount(0);
   };
 
-  const clearMatches = () => {
+  const clearMatches = useCallback(() => {
     setMatchedResponses([]);
+    setProcessedItems(new Set());
     setMatchCount(0);
-    setProcessedRequestIds(new Set());
-  };
+  }, []);
 
-  // Clear matches when httpRows is empty (logs cleared)
+  // Clear matches when both httpRows and wsRows are empty (logs cleared)
   useEffect(() => {
-    if (httpRows.length === 0) {
+    if (httpRows.length === 0 && wsRows.length === 0) {
       setMatchedResponses([]);
       setMatchCount(0);
-      setProcessedRequestIds(new Set());
+      setProcessedItems(new Set());
     }
-  }, [httpRows.length]);
+  }, [httpRows.length, wsRows.length]);
 
-  // Rules evaluation effect - only check response payload and prevent duplicates
+  // Main rule evaluation - simplified single approach
   useEffect(() => {
-    if (!httpRows.length || !rules.length) return;
-    
-    const latest = httpRows[httpRows.length - 1];
-    
-    // Skip if we've already processed this request (prevent duplicates)
-    if (!latest.id || processedRequestIds.has(latest.id)) {
-      return;
-    }
-    
-    // Only evaluate rules on response payload, not request
-    if (!latest.responsePayload) {
-      return;
-    }
-    
-    rules.forEach((rule) => {
-      // Create a context object with only response data for rule evaluation
-      const responseContext = {
-        responsePayload: latest.responsePayload,
-        method: latest.method,
-        status: latest.status,
-        endpoint: latest.endpoint,
-        displayName: latest.displayName
-      };
-      
-      if (deepEvaluateRule(rule, responseContext)) {
-        toast.success(`Rule matched for ${latest.method || "Call"}`);
-        setMatchCount((c) => c + 1);
-        setMatchedResponses((prev) => [...prev, {
-          method: latest.method || "Unknown Method",
-          displayName: latest.displayName || latest.method || "Unknown",
-          responsePayload: latest.responsePayload,
-          status: latest.status,
-          endpoint: latest.endpoint,
-          timestamp: latest.timestamp,
-          id: latest.id
-        }]);
-        
-        // Mark this request as processed
-        setProcessedRequestIds((prev) => new Set([...prev, latest.id]));
-      }
+    if ((!httpRows.length && !wsRows.length) || !rules.length) return;
+
+    console.log('[DEBUG] Running rule evaluation...', {
+      httpRowsLength: httpRows.length,
+      wsRowsLength: wsRows.length,
+      rulesLength: rules.length
     });
-  }, [httpRows, rules, processedRequestIds]);
+
+    const allRows = [
+      ...httpRows.map(row => ({ ...row, rowType: 'http' })),
+      ...wsRows.map(row => ({ ...row, rowType: 'ws' }))
+    ];
+
+    const newMatches: any[] = [];
+    const newProcessedItems = new Set(processedItems);
+
+    allRows.forEach((row) => {
+      // Create unique identifier based on type + method + timestamp
+      const method = row.method || row.action || 'unknown';
+      const timestamp = row.startTime || row.timestamp || Date.now();
+      const rowId = `${row.rowType}-${method}-${timestamp}`;
+
+      // Skip if already processed this method + timestamp combination
+      if (newProcessedItems.has(rowId)) {
+        return;
+      }
+
+      // For HTTP: check responsePayload, for WS: check payload
+      const payloadToCheck = row.rowType === 'http' ? row.responsePayload : row.payload;
+      
+      // Only evaluate rules if we have payload data
+      if (!payloadToCheck) {
+        console.log('[DEBUG] No payload data for row:', rowId);
+        return;
+      }
+
+      console.log('[DEBUG] Processing row:', rowId, 'with payload keys:', Object.keys(payloadToCheck));
+
+      rules.forEach((rule) => {
+        // Check method names filter - works for both HTTP methods and WS actions
+        if (rule.methodNames && rule.methodNames.length > 0) {
+          const methodToCheck = method.toLowerCase();
+          const methodMatches = rule.methodNames.some((methodName: string) =>
+            methodToCheck.includes(methodName.toLowerCase())
+          );
+          if (!methodMatches) {
+            console.log('[DEBUG] Method filter not matched:', methodToCheck, 'against', rule.methodNames);
+            return;
+          }
+        }
+
+        // For each condition, count individual field occurrences
+        rule.conditions.forEach((condition: any) => {
+          if (!condition.fieldPath || condition.value === '') return;
+
+          console.log(`[DEBUG] Searching for field: ${condition.fieldPath} = ${condition.value} in`, rowId);
+          
+          const fieldOccurrences = findFieldOccurrences(
+            payloadToCheck,
+            condition.fieldPath,
+            condition.value
+          );
+
+          console.log(`[DEBUG] Found ${fieldOccurrences.length} occurrences of ${condition.fieldPath}=${condition.value}`);
+
+          // Each occurrence gets its own match entry
+          fieldOccurrences.forEach((occurrence, index) => {
+            const matchId = `${row.id || timestamp}-${condition.fieldPath}-${index}`;
+            newMatches.push({
+              ...row,
+              id: matchId,
+              timestamp: timestamp,
+              matchedField: condition.fieldPath,
+              matchedValue: condition.value,
+              occurrencePath: occurrence,
+              occurrenceIndex: index + 1,
+              totalOccurrences: fieldOccurrences.length,
+              // Ensure we have the right payload for display
+              responsePayload: payloadToCheck,
+              method: method,
+              type: row.rowType,
+            });
+          });
+        });
+      });
+
+      // Mark as processed regardless of matches
+      newProcessedItems.add(rowId);
+    });
+
+    // Update processed items
+    setProcessedItems(newProcessedItems);
+
+    console.log(`[DEBUG] Found ${newMatches.length} new matches`);
+
+    // Process new matches
+    if (newMatches.length > 0) {
+      // Filter out duplicates based on match ID
+      const existingIds = new Set(matchedResponses.map((item) => item.id));
+      const uniqueNewMatches = newMatches.filter((match) => !existingIds.has(match.id));
+
+      console.log(`[DEBUG] Unique new matches: ${uniqueNewMatches.length}`);
+
+      if (uniqueNewMatches.length > 0) {
+        // Show individual toast notifications for each field occurrence
+        uniqueNewMatches.forEach((match, index) => {
+          const methodDisplay = match.method || 'Unknown';
+          const typePrefix = match.type === 'ws' ? 'WS' : 'HTTP';
+          
+          const message = match.totalOccurrences > 1
+            ? `Rule matched: ${typePrefix} ${methodDisplay} (${match.matchedField}=${match.matchedValue}, occurrence ${match.occurrenceIndex}/${match.totalOccurrences})`
+            : `Rule matched: ${typePrefix} ${methodDisplay} (${match.matchedField}=${match.matchedValue})`;
+
+          console.log(`[DEBUG] Showing toast ${index + 1}:`, message);
+
+          // Add a small delay between toasts to make them more visible
+          setTimeout(() => {
+            toast.success(message, {
+              duration: 4000,
+              position: "top-right",
+              id: `rule-match-${match.id}`, // Unique ID prevents deduplication
+            });
+          }, index * 100); // 100ms delay between each toast
+        });
+
+        // Update state
+        setMatchedResponses(prev => [...prev, ...uniqueNewMatches]);
+        setMatchCount(prev => prev + uniqueNewMatches.length);
+      }
+    }
+  }, [httpRows, wsRows, rules]); // Removed processedItems from dependencies to avoid loops
 
   return {
     rules,

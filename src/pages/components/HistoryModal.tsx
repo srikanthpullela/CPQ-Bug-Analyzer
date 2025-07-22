@@ -3,6 +3,7 @@ import React, { useState } from "react";
 import ReactJson from "react-json-view";
 import { diffLines, Change } from "diff";
 import FieldSelector from "../../FieldSelector";
+import { X } from "lucide-react";
 
 interface FrameMatch {
   id: string;
@@ -65,13 +66,13 @@ export const HistoryModal: React.FC<Props> = ({
   return (
     <>
       {/* Backdrop + Main Modal */}
-      <div className="history-modal-container fixed inset-0 bg-black z-40 bg-opacity-30 backdrop-blur-sm flex items-center justify-center">
+      <div className="history-modal-container fixed inset-0 bg-black z-40 bg-opacity-30 backdrop-blur-sm flex items-center bg-black bg-opacity-70 justify-center">
         <div className="history-modal bg-white rounded-lg shadow-lg w-11/12 sm:w-3/4 lg:w-2/3 h-[85vh] flex flex-col min-h-0 z-50 transform transition-transform duration-300 ease-out">
           {/* Header */}
           <div className="flex justify-between items-center p-4 border-b">
             <h3 className="text-xl font-semibold">History for “{fieldName}”</h3>
             <button onClick={onClose} className="text-2xl">
-              ×
+              <X size={20} />
             </button>
           </div>
 
@@ -99,7 +100,7 @@ export const HistoryModal: React.FC<Props> = ({
               /> */}
               <button
                 onClick={onSearch}
-                className="px-4 py-2 rounded border bg-gray-100 hover:bg-gray-200 focus:ring"
+                className="px-4 py-2 rounded border bg-green-700 hover:bg-green-600 focus:ring"
               >
                 Search
               </button>

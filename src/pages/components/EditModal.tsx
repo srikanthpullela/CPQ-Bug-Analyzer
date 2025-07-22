@@ -36,7 +36,7 @@ export const EditModal: React.FC<EditModalProps> = ({
       onClick={onClose}
     >
       <div
-        className={`query-modal rounded-lg shadow-lg w-11/12 sm:w-3/4 lg:w-2/3 h-[85vh] flex flex-col min-h-0 z-50 transform transition-all duration-300 ease-out p-4 ${
+        className={`query-modal rounded-lg shadow-lg w-11/12 sm:w-3/4 lg:w-2/3 h-[85vh] flex flex-col min-h-0 z-50 transform transition-all duration-300 ease-out ${
           isDarkMode ? "bg-gray-800" : "bg-white"
         }`}
         onClick={(e) => e.stopPropagation()}
