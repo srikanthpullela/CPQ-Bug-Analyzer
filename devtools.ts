@@ -38,22 +38,46 @@ function getDefaultUrlPatterns(): UrlPattern[] {
 function getUrlPatternsFromStorage(): UrlPattern[] {
   try {
     const stored = localStorage.getItem('har_extractor_url_patterns');
+    
     if (stored) {
       const patterns = JSON.parse(stored);
-      console.log('📖 devtools.ts: Loaded patterns from localStorage:', patterns);
       
-      // Simply return what's in localStorage - no filtering or modification
-      if (Array.isArray(patterns) && patterns.length > 0) {
+      // Return what's in localStorage - even if it's empty array, respect user's choice
+      if (Array.isArray(patterns)) {
         return patterns;
       }
     }
+    
+    // Only log this if no localStorage item exists at all
+    if (stored === null) {
+      console.log('📝 No localStorage key found - this is first time setup');
+    } else {
+      return []; // Return empty instead of overwriting with defaults
+    }
   } catch (error) {
-    console.warn('⚠️ devtools.ts: Error reading URL patterns from localStorage:', error);
+    console.warn('⚠️ getUrlPatternsFromStorage: Error reading patterns:', error);
+    return [];
   }
   
-  // Only use defaults if no localStorage data exists
-  console.log('📝 devtools.ts: No localStorage patterns found, using defaults');
+  // Only set defaults if localStorage key doesn't exist at all (first time)
   const defaults = getDefaultUrlPatterns();
+  
+  // Double-check that we're not overwriting existing data
+  try {
+    const doubleCheck = localStorage.getItem('har_extractor_url_patterns');
+    if (doubleCheck !== null) {
+      console.warn('⚠️ Race condition detected - localStorage was set between reads, not overwriting');
+      try {
+        const raceConditionPatterns = JSON.parse(doubleCheck);
+        return raceConditionPatterns;
+      } catch {
+        return [];
+      }
+    }
+  } catch (error) {
+    console.warn('⚠️ Error in double-check, proceeding with defaults');
+  }
+  
   saveUrlPatternsToStorage(defaults);
   return defaults;
 }
@@ -61,13 +85,25 @@ function getUrlPatternsFromStorage(): UrlPattern[] {
 function saveUrlPatternsToStorage(patterns: UrlPattern[]): void {
   try {
     localStorage.setItem('har_extractor_url_patterns', JSON.stringify(patterns));
+    
+    // Verify the save was successful by reading it back immediately
+    const verification = localStorage.getItem('har_extractor_url_patterns');
+    if (!verification) {
+      throw new Error('Failed to verify localStorage save - data not found');
+    }
   } catch (error) {
-    console.error('Error saving URL patterns to localStorage:', error);
+    console.error('❌ saveUrlPatternsToStorage: Error saving patterns:', error);
   }
 }
 
 function shouldProcessUrl(url: string): UrlPattern | null {
+  // Always get fresh patterns from localStorage - don't cache them
   const patterns = getUrlPatternsFromStorage();
+  
+  // If we get empty patterns (not defaults), log this clearly
+  if (patterns.length === 0) {
+    return null;
+  }
   
   // Filter out static assets with comprehensive patterns
   const staticAssetExtensions = [
@@ -89,15 +125,15 @@ function shouldProcessUrl(url: string): UrlPattern | null {
     return null;
   }
   
-  // Use patterns as configured by user - no more strict filtering
-  const matchedPattern = patterns.find(p => p.enabled && url.includes(p.pattern));
+  // Use fresh patterns from localStorage - always up to date
+  const matchedPattern = patterns.find(p => {
+    const isEnabled = p.enabled;
+    const urlContainsPattern = url.includes(p.pattern);
+    
+    return isEnabled && urlContainsPattern;
+  });
   
-  if (matchedPattern) {
-    console.log('🎯 devtools.ts: URL matched pattern:', matchedPattern.name, 'for URL:', url);
-    return matchedPattern;
-  }
-  
-  return null;
+  return matchedPattern;
 }
 
 function extractEndpointFromUrl(url: string): string {
@@ -190,16 +226,24 @@ function processRequestByPattern(request: any, reqJson: any, resJson: any, patte
   }
 }
 
+// Add a variable to track when patterns change
+let lastPatternHash: string | null = null;
+
+function getPatternHash(patterns: UrlPattern[]): string {
+  return JSON.stringify(patterns.map(p => ({ name: p.name, pattern: p.pattern, enabled: p.enabled })));
+}
+
 chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
   let currentTabId: number | null = null;
-
-  // Don't force reset patterns anymore - let localStorage persist user changes
-  console.log('📋 devtools.ts: Panel created, using existing localStorage patterns');
 
   panel.onShown.addListener((panelWindow) => {
     const tabId = chrome.devtools.inspectedWindow.tabId;
     currentTabId = tabId;
     const debuggee = { tabId };
+
+    // Force a fresh read of patterns when panel is shown and set initial hash
+    const currentPatterns = getUrlPatternsFromStorage();
+    lastPatternHash = getPatternHash(currentPatterns);
 
     if (!debuggerAttached) {
       chrome.debugger.attach(debuggee, "1.3", () => {
@@ -320,7 +364,7 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
       }
 
       if (method === "Page.loadEventFired") {
-        console.log("🔄 Page reload detected → clearing HTTP & WS data");
+        // Only clear when the page actually reloads, not during auto-refresh
         seenRequests.clear();
         seenWsMessages.clear();
         wsFirstTimestamp = null;
@@ -364,12 +408,31 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
       if (!chrome.devtools.network.getHAR) return;
 
       chrome.devtools.network.getHAR((harLog) => {
+        // Always get fresh patterns from localStorage for each reload
+        const currentPatterns = getUrlPatternsFromStorage();
+        const currentPatternHash = getPatternHash(currentPatterns);
+        
+        // If patterns have changed, we need to reprocess all requests
+        const patternsChanged = lastPatternHash !== null && lastPatternHash !== currentPatternHash;
+        
+        // Update the pattern hash
+        lastPatternHash = currentPatternHash;
+        
         for (const entry of harLog.entries || []) {
-          const matchedPattern = shouldProcessUrl(entry.request.url);
-          if (!matchedPattern) continue;
-
           const rid = (entry as any)._requestId;
-          if (seenRequests.has(rid)) continue;
+          
+          // If patterns haven't changed, skip already processed requests
+          if (!patternsChanged && seenRequests.has(rid)) {
+            continue;
+          }
+
+          // Use fresh patterns for each entry check
+          const matchedPattern = shouldProcessUrl(entry.request.url);
+          if (!matchedPattern) {
+            continue;
+          }
+
+          // Mark as seen AFTER pattern matching to ensure reprocessing works
           seenRequests.add(rid);
 
           const timestamp = new Date(entry.startedDateTime);
@@ -422,6 +485,7 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
       if (rid && seenRequests.has(rid)) return;
       if (rid) seenRequests.add(rid);
 
+      // Always get fresh patterns for real-time requests too
       const matchedPattern = shouldProcessUrl(request.request.url);
       if (!matchedPattern) return;
 
@@ -502,13 +566,75 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
 
       if (event.data.type === "SAVE_URL_PATTERNS") {
         console.log("💾 Panel requested to save URL patterns");
+        console.log("💾 Patterns to save:", event.data.patterns);
+        
+        // First, log what's currently in localStorage
+        try {
+          const currentStored = localStorage.getItem('har_extractor_url_patterns');
+          console.log("💾 Current localStorage before save:", currentStored);
+        } catch (error) {
+          console.log("💾 Error reading current localStorage:", error);
+        }
+        
         if (event.data.patterns && Array.isArray(event.data.patterns)) {
-          saveUrlPatternsToStorage(event.data.patterns);
+          try {
+            // Use the same validation and save approach as UrlPatternSettings.tsx
+            const patternsToSave = event.data.patterns.map(p => ({
+              name: p.name || 'Unnamed Pattern',
+              pattern: p.pattern || '',
+              type: p.type || 'generic',
+              enabled: p.enabled !== false,
+              description: p.description || ''
+            }));
+            
+            console.log('💾 Processed patterns to save:', patternsToSave);
+            
+            // Save directly to localStorage
+            localStorage.setItem('har_extractor_url_patterns', JSON.stringify(patternsToSave));
+            
+            // Verify the save was successful by reading it back immediately
+            const verification = localStorage.getItem('har_extractor_url_patterns');
+            if (verification) {
+              // Reset pattern tracking to force complete reprocessing
+              lastPatternHash = null;
+              seenRequests.clear();
+              
+              // Force a fresh reload of HAR data with new patterns
+              sendInitialHar();
+              
+              panelWindow.postMessage(
+                { 
+                  source: "HAR_EXTRACTOR", 
+                  type: "URL_PATTERNS_SAVED",
+                  success: true,
+                  shouldReload: false
+                },
+                "*"
+              );
+            } else {
+              throw new Error('Failed to verify localStorage save - data not found after save');
+            }
+            
+          } catch (error) {
+            console.error('❌ Error saving patterns:', error);
+            panelWindow.postMessage(
+              { 
+                source: "HAR_EXTRACTOR", 
+                type: "URL_PATTERNS_SAVED",
+                success: false,
+                error: error.message
+              },
+              "*"
+            );
+          }
+        } else {
+          console.error("💾 Invalid patterns data:", event.data.patterns);
           panelWindow.postMessage(
             { 
               source: "HAR_EXTRACTOR", 
               type: "URL_PATTERNS_SAVED",
-              success: true
+              success: false,
+              error: "Invalid patterns data"
             },
             "*"
           );
@@ -519,5 +645,3 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
     sendInitialHar();
   });
 });
-
-// Remove the force reset function - let user settings persist

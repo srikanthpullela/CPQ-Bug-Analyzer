@@ -88,7 +88,7 @@ export const WsTableTab: React.FC<Props> = ({
       <div className={`px-3 py-1 text-sm transition-colors duration-200 ${
         isDarkMode ? "text-gray-300" : "text-gray-700"
       }`} title={baseUrl}>
-        <em>Connection: {getDisplayUrl(baseUrl)}</em>
+        {/* <em>Connection: {getDisplayUrl(baseUrl)}</em> */}
       </div>
       <table className="min-w-full table-auto">
         <thead className={`transition-colors duration-200 ${

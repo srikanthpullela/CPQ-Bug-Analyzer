@@ -48,6 +48,10 @@ export const useRules = (httpRows: any[], wsRows: any[] = []) => {
       { fieldPath: "", operator: "===", value: "" },
     ]);
 
+  const removeCondition = (index: number) => {
+    setNewConditions(newConditions.filter((_, i) => i !== index));
+  };
+
   const updateCondition = (i: number, field: string, val: string) => {
     const updated = [...newConditions];
     updated[i][field] = val;
@@ -151,11 +155,17 @@ export const useRules = (httpRows: any[], wsRows: any[] = []) => {
           }
         }
 
-        // For each condition, count individual field occurrences
-        rule.conditions.forEach((condition: any) => {
-          if (!condition.fieldPath || condition.value === '') return;
+        // Check if ALL conditions are satisfied (AND logic)
+        const satisfiedConditions: Array<{condition: any, occurrences: string[]}> = [];
+        let allConditionsSatisfied = true;
 
-          console.log(`[DEBUG] Searching for field: ${condition.fieldPath} = ${condition.value} in`, rowId);
+        for (const condition of rule.conditions) {
+          if (!condition.fieldPath || condition.value === '') {
+            console.log('[DEBUG] Skipping empty condition:', condition);
+            continue;
+          }
+
+          console.log(`[DEBUG] Checking condition: ${condition.fieldPath} ${condition.operator} ${condition.value}`);
           
           const fieldOccurrences = findFieldOccurrences(
             payloadToCheck,
@@ -165,25 +175,45 @@ export const useRules = (httpRows: any[], wsRows: any[] = []) => {
 
           console.log(`[DEBUG] Found ${fieldOccurrences.length} occurrences of ${condition.fieldPath}=${condition.value}`);
 
-          // Each occurrence gets its own match entry
-          fieldOccurrences.forEach((occurrence, index) => {
-            const matchId = `${row.id || timestamp}-${condition.fieldPath}-${index}`;
-            newMatches.push({
-              ...row,
-              id: matchId,
-              timestamp: timestamp,
-              matchedField: condition.fieldPath,
-              matchedValue: condition.value,
-              occurrencePath: occurrence,
-              occurrenceIndex: index + 1,
-              totalOccurrences: fieldOccurrences.length,
-              // Ensure we have the right payload for display
-              responsePayload: payloadToCheck,
-              method: method,
-              type: row.rowType,
+          if (fieldOccurrences.length > 0) {
+            // Condition is satisfied
+            satisfiedConditions.push({
+              condition,
+              occurrences: fieldOccurrences
             });
-          });
-        });
+          } else {
+            // This condition is not satisfied, so the entire rule fails
+            allConditionsSatisfied = false;
+            console.log(`[DEBUG] Condition not satisfied: ${condition.fieldPath} ${condition.operator} ${condition.value}`);
+            break;
+          }
+        }
+
+        // Only create matches if ALL conditions are satisfied
+        if (allConditionsSatisfied && satisfiedConditions.length > 0) {
+          console.log(`[DEBUG] All ${satisfiedConditions.length} conditions satisfied for rule`);
+          
+          // Create a single match for this rule with all satisfied conditions
+          const ruleMatch = {
+            ...row,
+            id: `${row.id || timestamp}-rule-${Date.now()}`,
+            timestamp: timestamp,
+            satisfiedConditions: satisfiedConditions.map(sc => ({
+              fieldPath: sc.condition.fieldPath,
+              operator: sc.condition.operator,
+              value: sc.condition.value,
+              occurrenceCount: sc.occurrences.length,
+              occurrencePaths: sc.occurrences
+            })),
+            responsePayload: payloadToCheck,
+            method: method,
+            type: row.rowType,
+          };
+
+          newMatches.push(ruleMatch);
+        } else {
+          console.log(`[DEBUG] Rule not satisfied - only ${satisfiedConditions.length} of ${rule.conditions.length} conditions met`);
+        }
       });
 
       // Mark as processed regardless of matches
@@ -193,7 +223,7 @@ export const useRules = (httpRows: any[], wsRows: any[] = []) => {
     // Update processed items
     setProcessedItems(newProcessedItems);
 
-    console.log(`[DEBUG] Found ${newMatches.length} new matches`);
+    console.log(`[DEBUG] Found ${newMatches.length} new rule matches`);
 
     // Process new matches
     if (newMatches.length > 0) {
@@ -204,21 +234,24 @@ export const useRules = (httpRows: any[], wsRows: any[] = []) => {
       console.log(`[DEBUG] Unique new matches: ${uniqueNewMatches.length}`);
 
       if (uniqueNewMatches.length > 0) {
-        // Show individual toast notifications for each field occurrence
+        // Show individual toast notifications for each rule match
         uniqueNewMatches.forEach((match, index) => {
           const methodDisplay = match.method || 'Unknown';
           const typePrefix = match.type === 'ws' ? 'WS' : 'HTTP';
           
-          const message = match.totalOccurrences > 1
-            ? `Rule matched: ${typePrefix} ${methodDisplay} (${match.matchedField}=${match.matchedValue}, occurrence ${match.occurrenceIndex}/${match.totalOccurrences})`
-            : `Rule matched: ${typePrefix} ${methodDisplay} (${match.matchedField}=${match.matchedValue})`;
+          // Build condition summary for toast
+          const conditionSummary = match.satisfiedConditions
+            .map(sc => `${sc.fieldPath}${sc.operator}${sc.value}${sc.occurrenceCount > 1 ? ` (${sc.occurrenceCount}x)` : ''}`)
+            .join(' AND ');
+          
+          const message = `Rule matched: ${typePrefix} ${methodDisplay} - Conditions: ${conditionSummary}`;
 
           console.log(`[DEBUG] Showing toast ${index + 1}:`, message);
 
           // Add a small delay between toasts to make them more visible
           setTimeout(() => {
             toast.success(message, {
-              duration: 4000,
+              duration: 6000, // Longer duration since message is more detailed
               position: "top-right",
               id: `rule-match-${match.id}`, // Unique ID prevents deduplication
             });
@@ -244,6 +277,7 @@ export const useRules = (httpRows: any[], wsRows: any[] = []) => {
     showMatchesModal,
     setShowMatchesModal,
     addCondition,
+    removeCondition,
     updateCondition,
     openRuleModal,
     saveRule,

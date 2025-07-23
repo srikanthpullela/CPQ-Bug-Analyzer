@@ -45,7 +45,6 @@ export const UrlPatternSettings: React.FC<Props> = ({ isDarkMode = false, onClos
       const stored = localStorage.getItem('har_extractor_url_patterns');
       if (stored) {
         const localPatterns = JSON.parse(stored);
-        console.log('📖 Loading patterns from localStorage:', localPatterns);
         
         // Use exactly what's in localStorage - no filtering
         if (Array.isArray(localPatterns) && localPatterns.length > 0) {
@@ -54,42 +53,72 @@ export const UrlPatternSettings: React.FC<Props> = ({ isDarkMode = false, onClos
           return;
         }
       }
-      
-      console.log('📝 No patterns found in localStorage, setting defaults');
     } catch (error) {
       console.warn('⚠️ Error reading patterns from localStorage:', error);
     }
 
     // No localStorage data or error, use defaults
     const defaults = getDefaultPatterns();
-    console.log('Setting default patterns:', defaults);
     setPatterns(defaults);
     setIsLoading(false);
+  }, []);
+
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.source === "HAR_EXTRACTOR" && event.data?.type === "URL_PATTERNS_SAVED") {
+        if (event.data.success) {
+          toast.success("URL patterns saved successfully!", {
+            duration: 3000,
+            position: "top-right",
+          });
+          
+          // Ask user if they want to reload to see new patterns in action
+          if (event.data.shouldReload) {
+            setTimeout(() => {
+              const shouldReload = window.confirm(
+                "URL patterns have been updated! Would you like to reload the network data to apply the new patterns to existing requests?"
+              );
+              if (shouldReload) {
+                window.postMessage(
+                  { source: "HAR_EXTRACTOR", type: "REQUEST_HAR_RELOAD" },
+                  "*"
+                );
+              }
+            }, 500);
+          }
+        } else {
+          toast.error("Failed to save URL patterns", {
+            duration: 3000,
+            position: "top-right",
+          });
+        }
+      }
+    };
+
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
   }, []);
 
   const handleSave = async () => {
     setIsSaving(true);
     
     try {
-      // Simply save what the user has configured - no filtering or modification
+      // Simply save what the user has configured
       const patternsToSave = patterns.map(p => ({
         name: p.name || 'Unnamed Pattern',
         pattern: p.pattern || '',
         type: p.type || 'generic',
-        enabled: p.enabled !== false, // default to true
+        enabled: p.enabled !== false,
         description: p.description || ''
       }));
-      
-      console.log('Saving patterns to localStorage:', patternsToSave);
       
       // Save directly to localStorage
       localStorage.setItem('har_extractor_url_patterns', JSON.stringify(patternsToSave));
       
-      // Verify the save was successful by reading it back immediately
+      // Verify the save was successful
       const verification = localStorage.getItem('har_extractor_url_patterns');
       if (verification) {
         const parsed = JSON.parse(verification);
-        console.log('✅ Verification: Successfully saved and confirmed in localStorage:', parsed);
         
         // Update our state to match exactly what was saved
         setPatterns(parsed);

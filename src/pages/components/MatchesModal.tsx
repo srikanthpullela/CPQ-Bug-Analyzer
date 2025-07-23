@@ -140,8 +140,28 @@ export const MatchesModal: React.FC<MatchesModalProps> = ({
                         {response.method}
                       </span>
                       
-                      {/* Field occurrence info */}
-                      {response.matchedField && (
+                      {/* Field occurrence info - Updated to show all satisfied conditions */}
+                      {response.satisfiedConditions && response.satisfiedConditions.length > 0 && (
+                        <div className="flex flex-wrap gap-1">
+                          {response.satisfiedConditions.map((sc, idx) => (
+                            <span 
+                              key={idx}
+                              className={`inline-block px-2 py-1 rounded text-xs font-mono ${
+                                isDarkMode
+                                  ? "bg-purple-900 text-purple-200"
+                                  : "bg-purple-100 text-purple-800"
+                              }`}
+                              title={`Found ${sc.occurrenceCount} occurrence(s) at: ${sc.occurrencePaths.join(', ')}`}
+                            >
+                              {sc.fieldPath} {sc.operator} {sc.value}
+                              {sc.occurrenceCount > 1 && ` (${sc.occurrenceCount}x)`}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Legacy support for old single-condition matches */}
+                      {response.matchedField && !response.satisfiedConditions && (
                         <span className={`inline-block px-2 py-1 rounded text-xs font-mono ${
                           isDarkMode
                             ? "bg-purple-900 text-purple-200"
@@ -151,8 +171,19 @@ export const MatchesModal: React.FC<MatchesModalProps> = ({
                         </span>
                       )}
 
-                      {/* Occurrence location */}
-                      {response.occurrencePath && (
+                      {/* Occurrence location - Updated for multiple conditions */}
+                      {response.satisfiedConditions && response.satisfiedConditions.length > 0 && (
+                        <span className={`inline-block px-2 py-1 rounded text-xs font-mono ${
+                          isDarkMode
+                            ? "bg-gray-600 text-gray-300"
+                            : "bg-gray-200 text-gray-600"
+                        }`} title={`All conditions satisfied`}>
+                          ✓ All {response.satisfiedConditions.length} condition{response.satisfiedConditions.length > 1 ? 's' : ''} met
+                        </span>
+                      )}
+
+                      {/* Legacy occurrence path support */}
+                      {response.occurrencePath && !response.satisfiedConditions && (
                         <span className={`inline-block px-2 py-1 rounded text-xs font-mono ${
                           isDarkMode
                             ? "bg-gray-600 text-gray-300"

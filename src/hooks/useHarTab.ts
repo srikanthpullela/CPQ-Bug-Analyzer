@@ -90,18 +90,15 @@ export function useLiveHar() {
       if (event.data?.source !== "HAR_EXTRACTOR") return;
 
       const { type, payload } = event.data;
-      console.log(`[useLiveHar] Received message: ${type}`);
 
       switch (type) {
         case "CLEAR_LOGS":
-          console.log("[useLiveHar] Resetting logs and base URL");
           setHttpRows([]);
           setWsRows([]);
           setWsBaseUrl("");
           break;
 
         case "CLEAR":
-          console.log("[useLiveHar] Clearing all data");
           setHttpRows([]);
           setWsRows([]);
           setWsBaseUrl("");
@@ -277,42 +274,22 @@ export function useLiveHar() {
             return;
           }
 
-          console.log("[useLiveHar] Reloading HAR via getHAR()");
           chrome.devtools.network.getHAR((harLog) => {
             // Get URL patterns from localStorage to filter dynamically
             let urlPatterns: any[] = [];
             try {
               const stored = localStorage.getItem('har_extractor_url_patterns');
               urlPatterns = stored ? JSON.parse(stored) : [];
-              console.log("[useLiveHar] Loaded URL patterns:", urlPatterns);
             } catch (error) {
               console.warn('Error reading URL patterns:', error);
-              // Fallback to basic default patterns only
               urlPatterns = [
                 { pattern: 'apexremote', enabled: true, type: 'apex', name: 'ApexRemote' },
                 { pattern: 'congacloud', enabled: true, type: 'http', name: 'CongaCloud' }
               ];
             }
 
-            // More flexible filtering: Allow any pattern that contains the keywords
-            const allowedKeywords = ['apexremote', 'conga'];
-            const filteredPatterns = urlPatterns.filter(p => {
-              if (!p.enabled) return false;
-              const patternLower = p.pattern.toLowerCase();
-              const nameLower = (p.name || '').toLowerCase();
-              return allowedKeywords.some(keyword => 
-                patternLower.includes(keyword) || nameLower.includes(keyword)
-              );
-            });
-            
-            // Ensure we have default patterns if none are configured
-            const enabledPatterns = filteredPatterns.length > 0 ? filteredPatterns : [
-              { pattern: 'apexremote', enabled: true, type: 'apex', name: 'ApexRemote' },
-              { pattern: 'congacloud', enabled: true, type: 'http', name: 'CongaCloud' },
-              { pattern: 'conga', enabled: true, type: 'http', name: 'Conga' }
-            ];
-            
-            console.log("[useLiveHar] Using patterns for filtering:", enabledPatterns);
+            // Use ALL enabled patterns from localStorage
+            const enabledPatterns = urlPatterns.filter(p => p.enabled);
             
             // Filter out static assets with comprehensive patterns
             const staticAssetExtensions = [
@@ -341,21 +318,13 @@ export function useLiveHar() {
               // Then check if it matches any enabled pattern (case-insensitive and more flexible)
               const matchesPattern = enabledPatterns.some(pattern => {
                 const patternLower = pattern.pattern.toLowerCase();
-                const matches = url.includes(patternLower);
-                if (matches) {
-                  console.log(`[useLiveHar] URL "${entry.request.url}" matches pattern "${pattern.pattern}"`);
-                }
-                return matches;
+                return url.includes(patternLower);
               });
               
               return matchesPattern;
             });
 
-            console.log(`[useLiveHar] Found ${entries.length} entries matching patterns out of ${harLog.entries?.length || 0} total entries`);
-            
             if (!entries.length) {
-              console.warn("[useLiveHar] No matching entries found for configured patterns");
-              console.log("[useLiveHar] Sample URLs from HAR:", harLog.entries?.slice(0, 10).map(e => e.request.url));
               return;
             }
 
@@ -483,7 +452,7 @@ export function useLiveHar() {
           }
           break;
         default:
-          console.debug("[useLiveHar] Ignored message of type:", type);
+          break;
       }
     };
 

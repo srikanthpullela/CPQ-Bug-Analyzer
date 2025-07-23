@@ -48,7 +48,7 @@ const HarMethodsTabPage: React.FC = () => {
     return false;
   });
 
-  // Custom hooks - pass both httpRows and wsRows to useRules
+  // Custom hooks - restore both rules and edit modal hooks
   const rulesHook = useRules(httpRows, wsRows);
   const editModalHook = useEditModal(origin);
 
@@ -99,12 +99,7 @@ const HarMethodsTabPage: React.FC = () => {
       setSelectedRowKey(null);
       // Also clear rule matches when logs are cleared
       rulesHook.clearMatches();
-      console.warn(
-        "CLEAR received but httpRows/wsRows can't be cleared directly!"
-      );
     }
-
-    // Remove the manual rule checking trigger - now handled automatically by useEffect
   };
 
   // Dark mode effect
@@ -129,7 +124,6 @@ const HarMethodsTabPage: React.FC = () => {
   useEffect(() => {
     const handler = (e: MessageEvent) => {
       if (e.data.source === "HAR_EXTRACTOR" && e.data?.type === "HAR_SET_ORIGIN") {
-        console.log("[React] Origin received:", e.data.origin);
         setOrigin(e.data.origin);
       }
     };
@@ -149,7 +143,6 @@ const HarMethodsTabPage: React.FC = () => {
   };
 
   const confirmClearLogs = () => {
-    console.log("[HarMethodsTabPage] Requesting to clear logs via devtools.ts");
     window.postMessage(
       {
         source: "HAR_EXTRACTOR",
@@ -217,7 +210,6 @@ const HarMethodsTabPage: React.FC = () => {
                   searchTerm={searchTerm}
                   filteredHttpCount={filteredHttpCount}
                   filteredWsCount={filteredWsCount}
-                  wsBaseUrl={wsBaseUrl}
                   matchCount={rulesHook.matchCount}
                   rules={rulesHook.rules}
                   toggleDarkMode={toggleDarkMode}
@@ -235,7 +227,7 @@ const HarMethodsTabPage: React.FC = () => {
 
             {/* Scrollable Content Area */}
             <div className="flex-1 overflow-auto">
-              <div className="p-2 space-y-2">
+              <div className="p-2 space-y-2 pb-8">
                 <Toaster position="top-right" />
 
                 {/* Tables Section */}
@@ -311,6 +303,20 @@ const HarMethodsTabPage: React.FC = () => {
         </div>
       )}
 
+      {/* Edit Modal */}
+      <EditModal
+        open={editModalHook.editModalOpen}
+        editMethod={editModalHook.editMethod}
+        jsonValue={editModalHook.jsonValue}
+        jsonError={editModalHook.jsonError}
+        origin={origin}
+        isDarkMode={isDarkMode}
+        onClose={() => editModalHook.setEditModalOpen(false)}
+        onJsonChange={editModalHook.handleJsonChange}
+        onResetToOriginal={editModalHook.resetToOriginal}
+        onSendRequest={editModalHook.handleSendRequest}
+      />
+
       {/* Rule Modal */}
       <RuleModal
         open={rulesHook.ruleModalOpen}
@@ -319,6 +325,7 @@ const HarMethodsTabPage: React.FC = () => {
         onClose={() => rulesHook.setRuleModalOpen(false)}
         onAddCondition={rulesHook.addCondition}
         onUpdateCondition={rulesHook.updateCondition}
+        onRemoveCondition={rulesHook.removeCondition}
         onUpdateMethodNames={rulesHook.setMethodNames}
         onSave={rulesHook.saveRule}
         isDarkMode={isDarkMode}
@@ -334,20 +341,6 @@ const HarMethodsTabPage: React.FC = () => {
           isDarkMode={isDarkMode}
         />
       )}
-
-      {/* Edit Modal */}
-      <EditModal
-        open={editModalHook.editModalOpen}
-        editMethod={editModalHook.editMethod}
-        jsonValue={editModalHook.jsonValue}
-        jsonError={editModalHook.jsonError}
-        origin={origin}
-        isDarkMode={isDarkMode}
-        onClose={() => editModalHook.setEditModalOpen(false)}
-        onJsonChange={editModalHook.handleJsonChange}
-        onResetToOriginal={editModalHook.resetToOriginal}
-        onSendRequest={editModalHook.handleSendRequest}
-      />
 
       {/* URL Pattern Settings Modal */}
       {urlPatternSettingsOpen && (

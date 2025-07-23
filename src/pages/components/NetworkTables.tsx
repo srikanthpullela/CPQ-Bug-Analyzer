@@ -4,25 +4,33 @@ import { WsTableTab } from "./WsTableTab1";
 
 function getActivePatternNames(): string {
   try {
+    console.log('🔍 getActivePatternNames: Reading patterns...');
     const stored = localStorage.getItem('har_extractor_url_patterns');
+    console.log('🔍 getActivePatternNames: Raw stored value:', stored);
+    
     if (stored) {
       const patterns = JSON.parse(stored);
+      console.log('🔍 getActivePatternNames: Parsed patterns:', patterns);
+      
       const activeNames = patterns
         .filter((p: any) => p.enabled)
         .map((p: any) => p.name)
         .join(' & ');
+      
+      console.log('🔍 getActivePatternNames: Active names:', activeNames);
       return activeNames || 'API Methods';
     }
   } catch (error) {
     console.warn('Error reading URL patterns for header:', error);
   }
+  console.log('🔍 getActivePatternNames: Returning default');
   return 'API Methods';
 }
 
 interface NetworkTablesProps {
   httpRows: any[];
   wsRows: any[];
-  wsBaseUrl: string;
+  wsBaseUrl: string; // Keep this prop for the WS table
   searchTerm: string;
   selectedRowKey: string | null;
   isDarkMode: boolean;
@@ -106,57 +114,19 @@ export const NetworkTables: React.FC<NetworkTablesProps> = ({
   }
 
   return (
-    <div className="space-y-3">
-      {httpRows.length > 0 && (
-        <div
-          className={`rounded-lg shadow-sm border transition-colors duration-200 ${
-            isDarkMode
-              ? "bg-gray-800 border-gray-700"
-              : "bg-white border-gray-200"
-          }`}
-        >
-          <div
-            className={`px-3 py-2 border-b rounded-t-lg transition-colors duration-200 ${
-              isDarkMode
-                ? "bg-gray-700 border-gray-600"
-                : "bg-gray-50 border-gray-200"
-            }`}
-          >
-            <div className="flex items-center justify-between">
-              <h3
-                className={`font-semibold flex items-center gap-2 transition-colors duration-200 ${
-                  isDarkMode ? "text-gray-100" : "text-gray-800"
-                }`}
-              >
-                <span className="w-3 h-3 bg-blue-500 rounded-full"></span>
-                HTTP Requests
-              </h3>
-              <span
-                className={`text-sm transition-colors duration-200 ${
-                  isDarkMode ? "text-gray-300" : "text-gray-600"
-                }`}
-              >
-                {searchTerm
-                  ? `${filteredHttpCount} of ${httpRows.length}`
-                  : httpRows.length}{" "}
-                requests
-              </span>
-            </div>
-          </div>
-          <div className="p-2">
-            <HttpTableTab
-              rows={httpRows}
-              filter={searchTerm}
-              selectedRowKey={selectedRowKey}
-              onView={onView}
-              isDarkMode={isDarkMode}
-              headerTitle={getActivePatternNames()}
-            />
-          </div>
-        </div>
-      )}
+    <div className="space-y-4">
+      {/* HTTP Table */}
+      <HttpTableTab
+        rows={httpRows}
+        filter={searchTerm}
+        selectedRowKey={selectedRowKey}
+        onView={onView}
+        isDarkMode={isDarkMode}
+        headerTitle={getActivePatternNames()}
+      />
 
-      {wsRows.length > 0 && (
+      {/* WebSocket Table with connection info - Only show if there are WS messages OR an active connection */}
+      {(wsRows.length > 0 || wsBaseUrl) && (
         <div
           className={`rounded-lg shadow-sm border transition-colors duration-200 ${
             isDarkMode
@@ -164,44 +134,56 @@ export const NetworkTables: React.FC<NetworkTablesProps> = ({
               : "bg-white border-gray-200"
           }`}
         >
+          {/* WS Table Header with connection status */}
           <div
-            className={`px-3 py-2 border-b rounded-t-lg transition-colors duration-200 ${
-              isDarkMode
-                ? "bg-gray-700 border-gray-600"
-                : "bg-gray-50 border-gray-200"
+            className={`px-4 py-3 border-b transition-colors duration-200 ${
+              isDarkMode ? "border-gray-700" : "border-gray-200"
             }`}
           >
             <div className="flex items-center justify-between">
               <h3
-                className={`font-semibold flex items-center gap-2 transition-colors duration-200 ${
-                  isDarkMode ? "text-gray-100" : "text-gray-800"
+                className={`text-sm font-medium transition-colors duration-200 ${
+                  isDarkMode ? "text-gray-100" : "text-gray-900"
                 }`}
               >
-                <span className="w-3 h-3 bg-purple-500 rounded-full"></span>
-                WebSocket Messages
+                WebSocket Messages ({filteredWsCount})
               </h3>
-              <span
-                className={`text-sm transition-colors duration-200 ${
-                  isDarkMode ? "text-gray-300" : "text-gray-600"
-                }`}
-              >
-                {searchTerm
-                  ? `${filteredWsCount} of ${wsRows.length}`
-                  : wsRows.length}{" "}
-                messages
-              </span>
+
+              {/* WebSocket Connection Status */}
+              {wsBaseUrl && (
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+                  <span
+                    className={`text-xs font-medium transition-colors duration-200 ${
+                      isDarkMode ? "text-green-300" : "text-green-800"
+                    }`}
+                  >
+                    Connected:
+                  </span>
+                  <code
+                    className={`text-xs px-2 py-1 rounded font-mono transition-colors duration-200 max-w-none ${
+                      isDarkMode
+                        ? "text-green-200 bg-green-800/30 border border-green-700"
+                        : "text-green-700 bg-green-100 border border-green-200"
+                    }`}
+                    title={wsBaseUrl}
+                  >
+                    {wsBaseUrl}
+                  </code>
+                </div>
+              )}
             </div>
           </div>
-          <div className="p-2">
-            <WsTableTab
-              rows={wsRows}
-              baseUrl={wsBaseUrl}
-              filter={searchTerm}
-              selectedRowKey={selectedRowKey}
-              onView={onView}
-              isDarkMode={isDarkMode}
-            />
-          </div>
+
+          {/* WS Table Content */}
+          <WsTableTab
+            rows={wsRows}
+            baseUrl={wsBaseUrl}
+            filter={searchTerm}
+            selectedRowKey={selectedRowKey}
+            onView={onView}
+            isDarkMode={isDarkMode}
+          />
         </div>
       )}
     </div>

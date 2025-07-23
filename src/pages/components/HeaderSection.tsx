@@ -10,7 +10,6 @@ interface HeaderSectionProps {
   searchTerm: string;
   filteredHttpCount: number;
   filteredWsCount: number;
-  wsBaseUrl: string;
   matchCount: number;
   rules: any[];
   toggleDarkMode: () => void;
@@ -32,7 +31,6 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
   searchTerm,
   filteredHttpCount,
   filteredWsCount,
-  wsBaseUrl,
   matchCount,
   rules,
   toggleDarkMode,
@@ -227,35 +225,6 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
           placeholder="🔍 Search requests, responses, headers, or any field value..."
         />
       </div>
-      {wsBaseUrl && (
-        <div
-          className={`mt-2 p-2 border rounded-md transition-colors duration-200 ${
-            isDarkMode
-              ? "bg-green-900/20 border-green-700"
-              : "bg-green-50 border-green-200"
-          }`}
-        >
-          <div className="flex items-center gap-2">
-            <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-            <span
-              className={`text-xs font-medium transition-colors duration-200 ${
-                isDarkMode ? "text-green-300" : "text-green-800"
-              }`}
-            >
-              WebSocket Connected:
-            </span>
-            <code
-              className={`text-xs px-1 py-0.5 rounded font-mono transition-colors duration-200 ${
-                isDarkMode
-                  ? "text-green-200 bg-green-800/30"
-                  : "text-green-700 bg-green-100"
-              }`}
-            >
-              {wsBaseUrl}
-            </code>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

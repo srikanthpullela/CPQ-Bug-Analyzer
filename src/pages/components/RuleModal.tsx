@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+import { X, Trash2 } from "lucide-react";
 import React from "react";
 
 interface RuleModalProps {
@@ -8,6 +8,7 @@ interface RuleModalProps {
   onClose: () => void;
   onAddCondition: () => void;
   onUpdateCondition: (index: number, field: string, value: string) => void;
+  onRemoveCondition: (index: number) => void;
   onUpdateMethodNames: (value: string) => void;
   onSave: () => void;
   isDarkMode?: boolean;
@@ -20,6 +21,7 @@ export const RuleModal: React.FC<RuleModalProps> = ({
   onClose,
   onAddCondition,
   onUpdateCondition,
+  onRemoveCondition,
   onUpdateMethodNames,
   onSave,
   isDarkMode = false,
@@ -67,7 +69,7 @@ export const RuleModal: React.FC<RuleModalProps> = ({
         {/* Content */}
         <div className="flex-1 p-4 space-y-4 overflow-y-auto">
           {newConditions.map((c, idx) => (
-            <div key={idx} className="flex gap-2">
+            <div key={idx} className="flex gap-2 items-center">
               <input
                 className={`flex-1 border px-2 py-1 rounded transition-colors duration-200 ${
                   isDarkMode
@@ -106,6 +108,18 @@ export const RuleModal: React.FC<RuleModalProps> = ({
                   onUpdateCondition(idx, "value", e.target.value)
                 }
               />
+              {/* Delete button for each condition */}
+              <button
+                onClick={() => onRemoveCondition(idx)}
+                className={`p-2 rounded transition-colors duration-200 ${
+                  isDarkMode
+                    ? "text-red-400 hover:text-red-300 hover:bg-red-900/20"
+                    : "text-red-600 hover:text-red-700 hover:bg-red-100"
+                }`}
+                title="Remove this condition"
+              >
+                <Trash2 size={16} />
+              </button>
             </div>
           ))}
           <button
