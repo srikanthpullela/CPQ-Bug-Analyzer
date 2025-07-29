@@ -53,13 +53,13 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
     >
       <div className="flex items-center justify-between mb-2">
         <div className="flex items-center gap-4">
-          <h2
-            className={`text-lg font-semibold transition-colors duration-200 ${
-              isDarkMode ? "text-gray-100" : "text-gray-800"
+          <h1
+            className={`text-2xl font-bold transition-colors duration-200 ${
+              isDarkMode ? "text-white" : "text-gray-900"
             }`}
           >
-            Network Activity Monitor
-          </h2>
+            Network Calls
+          </h1>
           <div className="flex items-center gap-3 text-sm">
             <span
               className={`px-2 py-1 rounded-full font-medium text-align-center transition-colors duration-200 ${

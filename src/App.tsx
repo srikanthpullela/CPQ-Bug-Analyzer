@@ -9,6 +9,7 @@ import CompareJsonPage from "./pages/CompareJsonPage";
 import HarSupport from "./pages/HarMethod";
 import HarMethodsTabPage from "./pages/HarMethodsTabPage";
 import LogAnalyzerPage from './pages/LogAnalyzerPage';
+import { CodePieces } from "./pages/components/CodePieces";
 
 const App: React.FC = () => (
   <HashRouter>
@@ -21,6 +22,7 @@ const App: React.FC = () => (
       <Route path="/har" element={<HarSupport />} />
       <Route path="/harTab" element={<HarMethodsTabPage />} />
       <Route path="/log" element={<LogAnalyzerPage />} />
+      <Route path="/pieces" element={<CodePieces />} />
     </Routes>
   </HashRouter>
 );

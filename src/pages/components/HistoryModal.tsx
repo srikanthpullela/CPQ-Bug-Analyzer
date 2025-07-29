@@ -66,8 +66,11 @@ export const HistoryModal: React.FC<Props> = ({
   return (
     <>
       {/* Backdrop + Main Modal */}
-      <div className="history-modal-container fixed inset-0 bg-black z-40 bg-opacity-30 backdrop-blur-sm flex items-center bg-black bg-opacity-70 justify-center">
-        <div className="history-modal bg-white rounded-lg shadow-lg w-11/12 sm:w-3/4 lg:w-2/3 h-[85vh] flex flex-col min-h-0 z-50 transform transition-transform duration-300 ease-out">
+      <div
+        className="fixed inset-0 bg-black bg-opacity-60 backdrop-blur-lg flex items-center justify-center z-40"
+        style={{ backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)" }}
+      >
+        <div className="bg-white rounded-lg shadow-lg w-11/12 sm:w-3/4 lg:w-2/3 h-[85vh] flex flex-col min-h-0 z-50 transform transition-transform duration-300 ease-out">
           {/* Header */}
           <div className="flex justify-between items-center p-4 border-b">
             <h3 className="text-xl font-semibold">History for “{fieldName}”</h3>
@@ -100,7 +103,7 @@ export const HistoryModal: React.FC<Props> = ({
               /> */}
               <button
                 onClick={onSearch}
-                className="px-4 py-2 rounded border bg-green-700 hover:bg-green-600 focus:ring"
+                className="px-4 py-2 rounded-lg border bg-green-700 text-white hover:bg-green-600 focus:ring"
               >
                 Search
               </button>
@@ -220,11 +223,12 @@ export const HistoryModal: React.FC<Props> = ({
       {/* Object Preview Modal */}
       {previewData && (
         <div
-          className="preview-data-container fixed inset-0 bg-black bg-opacity-40 backdrop-blur-sm flex items-center justify-center z-60"
+          className="fixed inset-0 bg-black bg-opacity-70 backdrop-blur-lg flex items-center justify-center z-60"
+          style={{ backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)" }}
           onClick={() => setPreviewData(null)}
         >
           <div
-            className="preview-data bg-white rounded-lg shadow-lg w-3/4 max-h-[50vh] overflow-auto p-6"
+            className="bg-white rounded-lg shadow-lg w-3/4 max-h-[50vh] overflow-auto p-6"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex justify-between items-center mb-4">
@@ -250,11 +254,12 @@ export const HistoryModal: React.FC<Props> = ({
       {/* Diff Modal */}
       {diffData && (
         <div
-          className="history-diff-container fixed inset-0 bg-black bg-opacity-40 backdrop-blur-sm flex items-center justify-center z-60"
+          className="fixed inset-0 bg-black bg-opacity-70 backdrop-blur-lg flex items-center justify-center z-60"
+          style={{ backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)" }}
           onClick={() => setDiffData(null)}
         >
           <div
-            className="history-diff bg-white rounded-lg shadow-lg w-4/5 max-h-[60vh] overflow-auto p-6 font-mono text-sm z-60"
+            className="bg-white rounded-lg shadow-lg w-4/5 max-h-[60vh] overflow-auto p-6 font-mono text-sm z-60"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex justify-between items-center mb-4">

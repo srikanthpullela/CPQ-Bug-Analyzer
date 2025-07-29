@@ -1,7 +1,7 @@
 export function hasHttpPageMessages(contentText: string): boolean {
   try {
     const parsed = JSON.parse(contentText);
-    const pageErrors = parsed?.pageErrors;
+    const pageErrors = parsed?.pageErrors || parsed?.[0]?.result?.pageErrors;
     if (!pageErrors || typeof pageErrors !== "object") return false;
 
     return (

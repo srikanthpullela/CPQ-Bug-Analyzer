@@ -1,11 +1,11 @@
-# CPQ Bug Analyzer - Chrome DevTools Extension
+# Conga Bug Analyzer - Chrome DevTools Extension
 
 [![Chrome Extension](https://img.shields.io/badge/Chrome-Extension-blue?logo=google-chrome)](https://chrome.google.com/webstore)
 [![React](https://img.shields.io/badge/React-18.2.0-blue?logo=react)](https://reactjs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0.0-blue?logo=typescript)](https://typescriptlang.org/)
 [![Vite](https://img.shields.io/badge/Vite-5.0.0-yellow?logo=vite)](https://vitejs.dev/)
 
-A powerful Chrome DevTools extension designed for debugging and analyzing CPQ (Configure, Price, Quote) systems, specializing in Salesforce ApexRemote calls, CongaCloud APIs, and WebSocket connections. Built with React, TypeScript, and modern web technologies.
+A powerful Chrome DevTools extension designed for debugging and analyzing Conga (Configure, Price, Quote) systems, specializing in Salesforce ApexRemote calls, CongaCloud APIs, and WebSocket connections. Built with React, TypeScript, and modern web technologies.
 
 ## 🚀 Features
 
@@ -768,8 +768,8 @@ This project is licensed under the MIT License. See LICENSE file for details.
 
 ### Basic Operation
 1. Open Chrome DevTools (F12)
-2. Navigate to the "CPQ Analyzer" tab
-3. Visit a Salesforce CPQ page to start capturing API calls
+2. Navigate to the "Conga Analyzer" tab
+3. Visit a Salesforce Conga page to start capturing API calls
 4. Use the interface to analyze requests, responses, and WebSocket communications
 
 ### WebSocket Monitoring

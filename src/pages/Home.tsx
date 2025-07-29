@@ -204,6 +204,11 @@ const Home: React.FC = () => {
               <span className="btn-text">Compare</span>
             </Link>
 
+            <Link to="/pieces" className="btn enhanced-btn">
+              <span className="btn-icon">{"📝"}</span>
+              <span className="btn-text">Pieces</span>
+            </Link>
+
             <Link to="/har" className="btn enhanced-btn">
               <span className="btn-icon">{"📊"}</span>
               <span className="btn-text">HAR</span>
@@ -256,15 +261,17 @@ const Home: React.FC = () => {
       </header>
 
       <div
-        className={`sfdc-panels enhanced-panels ${isDragging ? 'dragging' : ''}`}
+        className={`sfdc-panels enhanced-panels ${
+          isDragging ? "dragging" : ""
+        }`}
         style={{ flexDirection: "column", height: "calc(100vh - 100px)" }}
       >
         <section
           className="panel top half enhanced-panel"
-          style={{ 
-            height: panelHeight.top, 
+          style={{
+            height: panelHeight.top,
             minHeight: "150px",
-            transition: isDragging ? "none" : "height 0.2s ease-out"
+            transition: isDragging ? "none" : "height 0.2s ease-out",
           }}
         >
           <div className="panel-header">
@@ -284,9 +291,11 @@ const Home: React.FC = () => {
           className="panel-divider draggable-divider"
           onMouseDown={handleMouseDown}
           onTouchStart={handleTouchStart}
-          style={{ 
+          style={{
             cursor: isDragging ? "ns-resize" : "ns-resize",
-            backgroundColor: isDragging ? "rgba(102, 126, 234, 0.2)" : "transparent"
+            backgroundColor: isDragging
+              ? "rgba(102, 126, 234, 0.2)"
+              : "transparent",
           }}
         >
           <div className="divider-line"></div>
@@ -295,10 +304,10 @@ const Home: React.FC = () => {
 
         <section
           className="panel bottom half enhanced-panel"
-          style={{ 
-            height: panelHeight.bottom, 
+          style={{
+            height: panelHeight.bottom,
             minHeight: "150px",
-            transition: isDragging ? "none" : "height 0.2s ease-out"
+            transition: isDragging ? "none" : "height 0.2s ease-out",
           }}
         >
           <div className="panel-header">

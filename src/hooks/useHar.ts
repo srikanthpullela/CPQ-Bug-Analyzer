@@ -11,8 +11,17 @@ export interface HttpRow {
   time: string;
   id: string;
   timestamp?: number;
-  startTime: number; // ✅ clear name
+  startTime: number;
   endTime?: number;
+  hasMessages?: boolean;
+  headers?: {
+    request?: any[];
+    response?: any[];
+  };
+  requestHeaders?: any[];
+  responseHeaders?: any[];
+  url?: string;
+  httpMethod?: string;
 }
 export interface WsRow {
   endpoint: string;
@@ -35,44 +44,121 @@ export function useHar() {
     return `${hh}:${mm}:${ss}`;
   };
 
-  function getLastSegment(url) {
+  function getLastSegment(url: string): string {
     const parts = url.split("/");
-    return parts.filter(Boolean).pop();
+    return parts.filter(Boolean).pop() || "endpoint";
   }
 
   function parseAndPopulateTables(entries: any[]) {
-    // 1) Build an initial array of HttpRow, possibly with null responsePayload
+    // Accept ALL HTTP requests, filter out only obvious static assets
     const initialRows: HttpRow[] = entries
-      .filter(
-        (ent) =>
-          ent.request.url.includes("apexremote") ||
-          ent.request.url.includes("congacloud")
-      )
+      .filter((ent) => {
+        const url = ent.request.url.toLowerCase();
+
+        // Filter out common static assets
+        const staticAssets = [
+          ".js",
+          ".css",
+          ".png",
+          ".jpg",
+          ".jpeg",
+          ".gif",
+          ".svg",
+          ".ico",
+          ".ttf",
+          ".woff",
+          ".woff2",
+          ".eot",
+          ".map",
+          ".json",
+          ".xml",
+          "favicon",
+          ".webp",
+          ".bmp",
+          ".tiff",
+          ".scss",
+          ".less",
+          ".ts.map",
+          ".min.js",
+          ".min.css",
+          ".chunk.js",
+          ".bundle.js",
+          ".vendor.js",
+          ".fonts",
+          ".font",
+          ".otf",
+          "/assets/",
+          "/static/",
+          "/images/",
+          "/img/",
+          ".html",
+        ];
+
+        const isStaticAsset = staticAssets.some((ext) => url.includes(ext));
+        return !isStaticAsset;
+      })
       .map((ent) => {
-        let method = "",
-          req: any = null,
-          res: any = null;
-        if (ent.request.postData) {
+        let method = "";
+        let req: any = null;
+        let res: any = null;
+
+        // Extract request payload - handle all request types
+        if (ent.request.postData?.text) {
           try {
             req = JSON.parse(ent.request.postData.text);
-            method = req.method;
-          } catch {}
+          } catch {
+            // Not JSON, store as raw text
+            req = { _rawText: ent.request.postData.text };
+          }
+        } else if (ent.request.queryString?.length > 0) {
+          // For GET requests with query parameters
+          req = Object.fromEntries(
+            ent.request.queryString.map((q) => [q.name, q.value])
+          );
+        } else {
+          // Even if no payload, create a basic request object
+          req = {
+            _method: ent.request.method || "GET",
+            _url: ent.request.url,
+            _headers: ent.request.headers || [],
+          };
         }
+
+        // Generate meaningful method name
+        const httpMethod = ent.request.method || "GET";
+        const urlPath = getLastSegment(ent.request.url);
+
+        if (req && typeof req === "object" && req.method) {
+          // If request has a method property (like ApexRemote), use it
+          method = req.method;
+        } else if (req && typeof req === "object" && req.action) {
+          // If request has an action property, use it
+          method = req.action;
+        } else {
+          // Default to HTTP method + URL endpoint
+          method = `${urlPath}`;
+        }
+
+        // Parse response content - handle all response types
         if (ent.response?.content?.text) {
           try {
             res = JSON.parse(ent.response.content.text);
-          } catch {}
-        }
-        if (ent.request.url.includes("conga")) {
-          method =
-            ent.request.method + " --> " + getLastSegment(ent.request.url);
+          } catch {
+            // Not JSON, store as raw text
+            res = { _rawContent: ent.response.content.text };
+          }
+        } else {
+          // Even if no response content, create a basic response object
+          res = {
+            _status: ent.response?.status || null,
+            _statusText: ent.response?.statusText || "",
+            _noContent: true,
+          };
         }
 
         const timeObj = new Date(ent.startedDateTime);
         const startTime = timeObj.getTime();
-
-        // Estimate end time from HAR timing object
-        const totalTimeMs = typeof ent.time === "number" ? ent.time : 0; // fallback
+        const totalTimeMs = typeof ent.time === "number" ? ent.time : 0;
         const endTime = startTime + totalTimeMs;
 
         const content = ent.response?.content?.text || "";
@@ -91,7 +177,18 @@ export function useHar() {
           id: uuidv4(),
           startTime,
           endTime,
-          timestamp: startTime, // ✅ new addition
+          timestamp: startTime,
+          httpMethod: httpMethod, // Ensure this is always set
+          url: ent.request.url,
+          endpoint: urlPath,
+          // Only include headers if they actually contain data
+          requestHeaders: (ent.request?.headers?.length > 0) ? ent.request.headers : [],
+          responseHeaders: (ent.response?.headers?.length > 0) ? ent.response.headers : [],
+          // Also provide headers in the legacy format for backward compatibility
+          headers: {
+            request: (ent.request?.headers?.length > 0) ? ent.request.headers : [],
+            response: (ent.response?.headers?.length > 0) ? ent.response.headers : []
+          }
         };
       });
 

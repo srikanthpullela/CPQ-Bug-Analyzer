@@ -1,7 +1,7 @@
 # Dark Mode Implementation Summary
 
 ## Overview
-Completed comprehensive dark mode support for all major components in the CPQ Bug Analyzer application. The dark mode state is managed in the main `HarMethodsTabPage` component and propagated to all child components.
+Completed comprehensive dark mode support for all major components in the Conga Bug Analyzer application. The dark mode state is managed in the main `HarMethodsTabPage` component and propagated to all child components.
 
 ## Components Updated
 

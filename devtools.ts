@@ -97,21 +97,13 @@ function saveUrlPatternsToStorage(patterns: UrlPattern[]): void {
 }
 
 function shouldProcessUrl(url: string): UrlPattern | null {
-  // Always get fresh patterns from localStorage - don't cache them
-  const patterns = getUrlPatternsFromStorage();
-  
-  // If we get empty patterns (not defaults), log this clearly
-  if (patterns.length === 0) {
-    return null;
-  }
-  
-  // Filter out static assets with comprehensive patterns
+  // Filter out only static assets, accept all API calls
   const staticAssetExtensions = [
     '.js', '.css', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', 
     '.ttf', '.woff', '.woff2', '.eot', '.map', '.json', '.xml',
     'favicon', '.webp', '.bmp', '.tiff', '.scss', '.less', '.ts.map',
     '.min.js', '.min.css', '.chunk.js', '.bundle.js', '.vendor.js',
-    '.fonts', '.font', '.otf', '.woff2', '/assets/', '/static/',
+    '.fonts', '.font', '.otf', '/assets/', '/static/',
     'googletagmanager', 'google-analytics', 'analytics.js',
     'gtag/js', 'doubleclick', 'googleadservices', 'facebook.net',
     'hotjar', 'intercom', 'zendesk', '/images/', '/img/', '/icons/'
@@ -124,16 +116,17 @@ function shouldProcessUrl(url: string): UrlPattern | null {
   if (isStaticAsset) {
     return null;
   }
+
+  // Get current patterns and find a match
+  const currentPatterns = getUrlPatternsFromStorage();
+  const enabledPatterns = currentPatterns.filter(p => p.enabled);
   
-  // Use fresh patterns from localStorage - always up to date
-  const matchedPattern = patterns.find(p => {
-    const isEnabled = p.enabled;
-    const urlContainsPattern = url.includes(p.pattern);
-    
-    return isEnabled && urlContainsPattern;
+  const matchedPattern = enabledPatterns.find(pattern => {
+    const patternLower = pattern.pattern.toLowerCase();
+    return url.toLowerCase().includes(patternLower);
   });
-  
-  return matchedPattern;
+
+  return matchedPattern || null;
 }
 
 function extractEndpointFromUrl(url: string): string {
@@ -471,6 +464,8 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
                   timestamp: startTime,
                   baseUrl: new URL(entry.request.url).origin,
                   endTime,
+                  requestHeaders: entry.request.headers || [],
+                  responseHeaders: entry.response?.headers || [],
                 },
               },
               "*"
@@ -485,7 +480,7 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
       if (rid && seenRequests.has(rid)) return;
       if (rid) seenRequests.add(rid);
 
-      // Always get fresh patterns for real-time requests too
+      // Check if this should be processed (not a static asset)
       const matchedPattern = shouldProcessUrl(request.request.url);
       if (!matchedPattern) return;
 
@@ -495,14 +490,32 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
             let j = {};
             try {
               j = JSON.parse(b.postData?.text || "{}");
-            } catch {}
+            } catch {
+              j = { 
+                _method: request.request.method,
+                _url: request.request.url,
+                _rawText: b.postData?.text || "" 
+              };
+            }
             cb(j);
           });
         } else {
           try {
-            cb(JSON.parse(request.request.postData?.text || "{}"));
+            const postData = request.request.postData?.text;
+            if (postData) {
+              cb(JSON.parse(postData));
+            } else {
+              cb({ 
+                _method: request.request.method,
+                _url: request.request.url 
+              });
+            }
           } catch {
-            cb({});
+            cb({ 
+              _method: request.request.method,
+              _url: request.request.url,
+              _rawText: request.request.postData?.text || ""
+            });
           }
         }
       };
@@ -513,16 +526,41 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
           if (content) {
             try {
               resJson = JSON.parse(content);
-            } catch {}
+            } catch {
+              resJson = { 
+                _rawContent: content,
+                _status: request.response?.status 
+              };
+            }
+          } else {
+            resJson = { 
+              _empty: true,
+              _status: request.response?.status 
+            };
           }
 
-          const processedPayload = processRequestByPattern(request, reqJson, resJson, matchedPattern);
+          // Generate method name
+          const httpMethod = request.request.method || 'GET';
+          const endpoint = extractEndpointFromUrl(request.request.url);
+          const method = reqJson.method || reqJson.action || `${httpMethod} ${endpoint}`;
 
           panelWindow.postMessage(
             {
               source: "HAR_EXTRACTOR",
               type: "HTTP_REQUEST",
-              payload: processedPayload,
+              payload: {
+                method,
+                requestPayload: reqJson,
+                responsePayload: resJson,
+                status: request.response?.status ?? null,
+                timestamp: Date.now(),
+                endTime: Date.now(),
+                httpMethod,
+                endpoint,
+                url: request.request.url,
+                requestHeaders: request.request.headers || [],
+                responseHeaders: request.response?.headers || []
+              },
             },
             "*"
           );

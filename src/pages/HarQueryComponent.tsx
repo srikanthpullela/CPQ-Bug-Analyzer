@@ -119,6 +119,20 @@ const HarQueryComponent: React.FC<Props> = ({ httpRows, wsRows, onClose, isDarkM
     httpRows.forEach((r) => {
       searchObj(r.requestPayload, `HTTP ▶ ${r.method} Request`);
       searchObj(r.responsePayload, `HTTP ▶ ${r.method} Response`);
+      
+      // Add headers search with null safety
+      if (r.requestHeaders?.length > 0) {
+        searchObj(r.requestHeaders, `HTTP ▶ ${r.method} Request Headers`);
+      }
+      if (r.responseHeaders?.length > 0) {
+        searchObj(r.responseHeaders, `HTTP ▶ ${r.method} Response Headers`);
+      }
+      if (r.headers?.request?.length > 0) {
+        searchObj(r.headers.request, `HTTP ▶ ${r.method} Headers (Request)`);
+      }
+      if (r.headers?.response?.length > 0) {
+        searchObj(r.headers.response, `HTTP ▶ ${r.method} Headers (Response)`);
+      }
     });
 
     wsRows.forEach((r) => {

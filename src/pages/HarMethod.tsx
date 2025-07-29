@@ -1,7 +1,7 @@
 "use client";
 
 import type React from "react";
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef, useMemo, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { useHar } from "../hooks/useHar";
 import { useFieldHistory } from "../hooks/useFieldHistory";
@@ -17,6 +17,7 @@ import "../style.css";
 import { UploadHistoryList } from "./components/UploadHistoryList";
 import { Activity, History, Search, FileText, Zap } from "lucide-react";
 import HarQueryComponent from "./HarQueryComponent";
+import { v4 as uuidv4 } from "uuid";
 
 interface HarEntry {
   startedDateTime?: string;
@@ -54,8 +55,19 @@ const HarMethodsPage: React.FC = () => {
 
   const [activeRowKey, setActiveRowKey] = useState<string | null>(null);
   const [queryModalOpen, setQueryModalOpen] = useState(false);
+  const [selectedRowId, setSelectedRowId] = useState<string | null>(null);
+  
+  // Add state for showing all network calls vs filtered
+  const [showAllNetworkCalls, setShowAllNetworkCalls] = useState(false);
+  const [allHttpRows, setAllHttpRows] = useState<any[]>([]);
+  const [allWsRows, setAllWsRows] = useState<any[]>([]);
 
+  // Add state for panel sizes
+  const [leftPanelWidth, setLeftPanelWidth] = useState(60); // percentage
+  const [isResizing, setIsResizing] = useState(false);
+  
   const panelRef = useRef(null);
+  const containerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setIsPageLoaded(true);
@@ -101,18 +113,263 @@ const HarMethodsPage: React.FC = () => {
     return Array.from(keySet).sort();
   }
 
-  const extractedKeys = useMemo(() => {
-    return extractUniqueKeys([...httpRows, ...wsRows]);
-  }, [httpRows, wsRows]);
+  // Get current rows based on toggle state
+  const currentHttpRows = showAllNetworkCalls ? allHttpRows : httpRows;
+  const currentWsRows = showAllNetworkCalls ? allWsRows : wsRows;
 
-  function handleHistoryLoad(id: string) {
+  // Update history and query to use current rows
+  const showHistory = () => {
+    const history = buildHistory(fieldName);
+    setHistoryTree(history);
+    setHistoryModalOpen(true);
+  };
+
+  // Update extractedKeys to use current rows
+  const extractedKeys = useMemo(() => {
+    return extractUniqueKeys([...currentHttpRows, ...currentWsRows]);
+  }, [currentHttpRows, currentWsRows]);
+
+  // Add function to load all network calls
+  const loadAllNetworkCalls = () => {
+    if (!harText) return;
+    
+    try {
+      const har = JSON.parse(harText);
+      const allEntries = har.log?.entries || [];
+      
+      // Process ALL HTTP entries with minimal filtering - only exclude obvious static assets
+      const allHttpRows = allEntries
+        .filter((ent) => {
+          // Only filter out obvious static assets, keep everything else
+          if (!ent.request?.url) return false;
+          
+          const url = ent.request.url.toLowerCase();
+          const staticAssets = [
+            ".js", ".css", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".ico",
+            ".ttf", ".woff", ".woff2", ".eot", ".map", 
+            "favicon", ".webp", ".bmp", ".tiff", ".scss", ".less", ".ts.map",
+            ".min.js", ".min.css", ".chunk.js", ".bundle.js", ".vendor.js",
+            ".fonts", ".font", ".otf", "/assets/", "/static/", "/images/", "/img/"
+          ];
+          const isStaticAsset = staticAssets.some((ext) => url.includes(ext));
+          return !isStaticAsset;
+        })
+        .map((ent) => {
+          // Process similar to existing logic but for ALL requests
+          let method = "";
+          let req: any = null;
+          let res: any = null;
+
+          // Extract request payload
+          if (ent.request.postData?.text) {
+            try {
+              req = JSON.parse(ent.request.postData.text);
+            } catch {
+              req = { _rawText: ent.request.postData.text };
+            }
+          } else if (ent.request.queryString?.length > 0) {
+            req = Object.fromEntries(
+              ent.request.queryString.map((q) => [q.name, q.value])
+            );
+          } else {
+            req = {
+              _method: ent.request.method || "GET",
+              _url: ent.request.url,
+              _headers: ent.request.headers || [],
+            };
+          }
+
+          const httpMethod = ent.request.method || "GET";
+          const urlParts = ent.request.url.split("/").filter(Boolean);
+          const urlPath = urlParts[urlParts.length - 1] || "endpoint";
+
+          if (req && typeof req === "object" && req.method) {
+            method = req.method;
+          } else if (req && typeof req === "object" && req.action) {
+            method = req.action;
+          } else {
+            method = `${urlPath}`;
+          }
+
+          // Parse response content
+          if (ent.response?.content?.text) {
+            try {
+              res = JSON.parse(ent.response.content.text);
+            } catch {
+              res = { _rawContent: ent.response.content.text };
+            }
+          } else {
+            res = {
+              _status: ent.response?.status || null,
+              _statusText: ent.response?.statusText || "",
+              _noContent: true,
+            };
+          }
+
+          const timeObj = new Date(ent.startedDateTime);
+          const startTime = timeObj.getTime();
+          const totalTimeMs = typeof ent.time === "number" ? ent.time : 0;
+          const endTime = startTime + totalTimeMs;
+
+          return {
+            method,
+            requestPayload: req,
+            responsePayload: res,
+            status: typeof ent.response?.status === "number" ? ent.response.status : null,
+            time: formatTime(timeObj),
+            hasMessages: false,
+            id: uuidv4(),
+            startTime,
+            endTime,
+            timestamp: startTime,
+            httpMethod,
+            url: ent.request.url,
+            endpoint: urlPath,
+            requestHeaders: ent.request?.headers || [],
+            responseHeaders: ent.response?.headers || [],
+            headers: {
+              request: ent.request?.headers || [],
+              response: ent.response?.headers || []
+            }
+          };
+        });
+
+      // Process ALL WebSocket entries - properly handle WebSocket messages
+      const allWsEntries: any[] = [];
+      let foundWsBaseUrl = wsBaseUrl; // Use existing wsBaseUrl as starting point
+      
+      allEntries.forEach((ent, entryIndex) => {
+        // Check for WebSocket entries more comprehensively
+        const hasWebSocketUrl = /^wss?:\/\//.test(ent.request?.url || '');
+        const hasWebSocketMessages = (ent.messages && ent.messages.length > 0) || 
+                                   (ent._webSocketMessages && ent._webSocketMessages.length > 0) ||
+                                   (ent.response?._webSocketMessages && ent.response._webSocketMessages.length > 0);
+        
+        const isWebSocketEntry = hasWebSocketUrl || hasWebSocketMessages;
+        
+        if (isWebSocketEntry) {
+          // Set WebSocket base URL if we find one
+          if (hasWebSocketUrl && !foundWsBaseUrl) {
+            foundWsBaseUrl = ent.request.url.split("?")[0];
+          }
+          
+          // Get frames from multiple possible locations
+          let frames = [];
+          if (ent.messages && ent.messages.length > 0) {
+            frames = ent.messages;
+          } else if (ent._webSocketMessages && ent._webSocketMessages.length > 0) {
+            frames = ent._webSocketMessages;
+          } else if (ent.response?._webSocketMessages && ent.response._webSocketMessages.length > 0) {
+            frames = ent.response._webSocketMessages;
+          }
+          
+          const status = typeof ent.response?.status === "number" ? ent.response.status : null;
+          
+          // If no frames but it's a WebSocket URL, create a connection entry
+          if (frames.length === 0 && hasWebSocketUrl) {
+            allWsEntries.push({
+              endpoint: ent.request.url.split("?")[0] || 'WebSocket Connection',
+              action: 'Connection',
+              payload: { 
+                _connectionInfo: true,
+                url: ent.request.url,
+                headers: ent.request.headers || []
+              },
+              status,
+              time: formatTime(new Date(ent.startedDateTime || Date.now())),
+              timestamp: new Date(ent.startedDateTime || Date.now()).getTime(),
+              direction: 'connection',
+              id: `ws-connection-${entryIndex}`
+            });
+          }
+          
+          frames.forEach((frame, frameIndex) => {
+            try {
+              const obj = JSON.parse(frame.data);
+              
+              // Skip heartbeat messages
+              if ((obj.Action || "").toLowerCase() === "heartbeat") return;
+              
+              const endpoint = obj.EndPoint
+                ? obj.EndPoint
+                : obj.TaskId
+                ? `TaskId: ${obj.TaskId}`
+                : foundWsBaseUrl || ent.request?.url?.split("?")[0] || 'Unknown WebSocket';
+              
+              const action = obj.Action || obj.action || frame.type || "Message";
+              
+              // Use frame timestamp if available, otherwise entry timestamp
+              const frameTime = typeof frame.time === "number" 
+                ? new Date(frame.time * 1000)
+                : new Date(ent.startedDateTime || Date.now());
+              
+              const timeMs = frameTime.getTime();
+              const timeStr = formatTime(frameTime);
+              
+              allWsEntries.push({
+                endpoint,
+                action,
+                payload: obj,
+                status,
+                time: timeStr,
+                timestamp: timeMs,
+                direction: frame.type === 'send' ? 'sent' : 'received',
+                id: `ws-${entryIndex}-${frameIndex}`
+              });
+            } catch (error) {
+              console.warn('Failed to parse WebSocket frame:', error, frame);
+              // Even if parsing fails, create an entry with raw data
+              const endpoint = foundWsBaseUrl || ent.request?.url?.split("?")[0] || 'Unknown WebSocket';
+              allWsEntries.push({
+                endpoint,
+                action: 'Raw Message',
+                payload: { _rawData: frame.data, _parseError: error.message },
+                status: null,
+                time: formatTime(new Date(ent.startedDateTime || Date.now())),
+                timestamp: new Date(ent.startedDateTime || Date.now()).getTime(),
+                direction: frame.type === 'send' ? 'sent' : 'received',
+                id: `ws-${entryIndex}-${frameIndex}-raw`
+              });
+            }
+          });
+        }
+      });
+
+      console.log('Loaded all network calls:', allHttpRows.length, 'HTTP,', allWsEntries.length, 'WS');
+      setAllHttpRows(allHttpRows);
+      setAllWsRows(allWsEntries);
+    } catch (err) {
+      console.warn("Failed to load all network calls", err);
+    }
+  };
+
+  const formatTime = (date: Date) => {
+    const hh = String(date.getHours()).padStart(2, "0");
+    const mm = String(date.getMinutes()).padStart(2, "0");
+    const ss = String(date.getSeconds()).padStart(2, "0");
+    return `${hh}:${mm}:${ss}`;
+  };
+
+  const handleHistoryLoad = (id: string) => {
     const match = recentUploads.find((u) => u.id === id);
     if (match) {
       const animateLoad = async () => {
         setIsPageLoaded(false);
+        
+        // Clear cached data and reset state for history loads too
+        setAllHttpRows([]);
+        setAllWsRows([]);
+        setShowAllNetworkCalls(false);
+        setPanelOpen(false);
+        setSelectedRowId(null);
+        
         await new Promise((resolve) => setTimeout(resolve, 200));
         const parsed = match.data;
         const entries = parsed?.log?.entries || [];
+        
+        // Update harText to ensure loadAllNetworkCalls works with the loaded data
+        setHarText(JSON.stringify(parsed));
+        
         parseAndPopulateTables(entries);
         setIsPageLoaded(true);
       };
@@ -123,6 +380,14 @@ const HarMethodsPage: React.FC = () => {
 
   const handleParse = (text: string, name: string) => {
     setHarText(text);
+    
+    // Clear all cached data when loading new HAR
+    setAllHttpRows([]);
+    setAllWsRows([]);
+    setShowAllNetworkCalls(false); // Reset to filtered view for new uploads
+    setPanelOpen(false); // Close any open panels
+    setSelectedRowId(null);
+    
     try {
       const har = JSON.parse(text);
       const entry: UploadEntry = {
@@ -213,7 +478,7 @@ const HarMethodsPage: React.FC = () => {
     }
   };
 
-  const openPanel = (title: string, data: any) => {
+  const openPanel = (title: string, data: any, rowId?: string) => {
     console.log("Opening panel with title:", title);
     console.log(
       "Data passed to panel (data.responsePayload if applicable):",
@@ -227,20 +492,67 @@ const HarMethodsPage: React.FC = () => {
     setPanelTitle(title);
     setPanelData(data);
     setPanelOpen(true);
+    setSelectedRowId(rowId || null);
     const key = `${title}_${Date.now()}`;
     setActiveRowKey(key);
   };
 
-  const showHistory = () => {
-    setHistoryTree(buildHistory(fieldName));
-    setHistoryModalOpen(true);
-  };
+  // Add resize handlers
+  const handleMouseDown = useCallback((e: React.MouseEvent) => {
+    setIsResizing(true);
+    e.preventDefault();
+  }, []);
+
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    if (!isResizing || !containerRef.current) return;
+    
+    const containerRect = containerRef.current.getBoundingClientRect();
+    const newLeftWidth = ((e.clientX - containerRect.left) / containerRect.width) * 100;
+    
+    // Constrain between 30% and 80%
+    const constrainedWidth = Math.max(30, Math.min(80, newLeftWidth));
+    setLeftPanelWidth(constrainedWidth);
+  }, [isResizing]);
+
+  const handleMouseUp = useCallback(() => {
+    setIsResizing(false);
+  }, []);
+
+  useEffect(() => {
+    if (isResizing) {
+      document.addEventListener('mousemove', handleMouseMove);
+      document.addEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+    } else {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    }
+
+    return () => {
+      document.removeEventListener('mousemove', handleMouseMove);
+      document.removeEventListener('mouseup', handleMouseUp);
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+    };
+  }, [isResizing, handleMouseMove, handleMouseUp]);
+
+  // Load all calls when toggle is enabled for the first time
+  useEffect(() => {
+    if (showAllNetworkCalls && allHttpRows.length === 0 && harText) {
+      console.log('Loading all network calls...');
+      loadAllNetworkCalls();
+    }
+  }, [showAllNetworkCalls, harText]);
 
   return (
-    <div className="flex h-screen bg-slate-50">
+    <div ref={containerRef} className="flex h-screen bg-slate-50">
       <AnimatePresence>
         <motion.div
-          className="w-3/5 overflow-auto"
+          className="overflow-auto"
+          style={{ width: `${leftPanelWidth}%` }}
           initial={{ opacity: 0 }}
           animate={{ opacity: isPageLoaded ? 1 : 0 }}
           exit={{ opacity: 0 }}
@@ -321,6 +633,7 @@ const HarMethodsPage: React.FC = () => {
               />
             </motion.div>
 
+            {/* Query Modal - Updated to use current rows */}
             {queryModalOpen && (
               <div
                 className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4 animate-in fade-in duration-200"
@@ -331,8 +644,8 @@ const HarMethodsPage: React.FC = () => {
                   onClick={(e) => e.stopPropagation()}
                 >
                   <HarQueryComponent
-                    httpRows={httpRows}
-                    wsRows={wsRows}
+                    httpRows={currentHttpRows}
+                    wsRows={currentWsRows}
                     onClose={() => setQueryModalOpen(false)}
                   />
                 </div>
@@ -362,13 +675,12 @@ const HarMethodsPage: React.FC = () => {
               animate={{ opacity: 1, y: 0 }}
               transition={{ duration: 0.3, delay: 0.2 }}
             >
-              <div className="flex items-center gap-3">
+              <div className="flex items-center gap-3 mb-3">
                 <div className="flex-1 relative">
                   <Search className="absolute left-2 top-1/2 pl-3 transform -translate-y-1/2 w-3 h-3 text-slate-400" />
                   <SearchInput
                     value={searchTerm}
                     onChange={setSearchTerm}
-                    // className="pl-7 py-1.5 text-sm"
                   />
                 </div>
                 <motion.button
@@ -387,6 +699,43 @@ const HarMethodsPage: React.FC = () => {
                   Query Search
                 </button>
               </div>
+
+              {/* Add toggle for showing all network calls */}
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <label className="flex items-center cursor-pointer group">
+                    <input
+                      type="checkbox"
+                      checked={showAllNetworkCalls}
+                      onChange={(e) => {
+                        setShowAllNetworkCalls(e.target.checked);
+                        if (e.target.checked && allHttpRows.length === 0) {
+                          loadAllNetworkCalls();
+                        }
+                      }}
+                      className="w-4 h-4 text-indigo-600 border-gray-300 focus:ring-indigo-500 focus:ring-2 rounded"
+                    />
+                    <span className="ml-2 text-sm text-slate-600 group-hover:text-slate-800">
+                      Show All Network Calls
+                    </span>
+                  </label>
+                  <span className="text-xs text-slate-500">
+                    {showAllNetworkCalls 
+                      ? `Showing ${currentHttpRows.length + currentWsRows.length} total calls`
+                      : `Showing ${currentHttpRows.length + currentWsRows.length} filtered calls`
+                    }
+                  </span>
+                </div>
+                
+                {showAllNetworkCalls && (
+                  <button
+                    onClick={loadAllNetworkCalls}
+                    className="px-2 py-1 text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 rounded transition-colors"
+                  >
+                    Refresh All
+                  </button>
+                )}
+              </div>
             </motion.div>
 
             {/* HTTP Table Section */}
@@ -399,50 +748,72 @@ const HarMethodsPage: React.FC = () => {
               <div className="px-3 py-2 bg-slate-50 border-b border-slate-200">
                 <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
                   <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>
-                  HTTP Requests
+                  Network Calls ({currentHttpRows.length} total) - 
+                  {showAllNetworkCalls ? " All calls" : " Filtered calls"} - Headers shown when available
                 </h3>
               </div>
-              <div className="p-3">
+              <div className="table-container-with-sticky">
                 <HttpTable
-                  rows={httpRows}
+                  rows={currentHttpRows}
                   filter={searchTerm}
                   onView={openPanel}
+                  selectedRowId={selectedRowId}
+                  showAllCalls={showAllNetworkCalls}
                 />
               </div>
             </motion.div>
 
-            {/* WebSocket Table Section */}
-            <motion.div
-              className="bg-white rounded-lg border border-slate-200 overflow-hidden"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.3, delay: 0.3 }}
-            >
-              <div className="px-3 py-2 bg-slate-50 border-b border-slate-200">
-                <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
-                  <div className="w-1.5 h-1.5 bg-blue-500 rounded-full"></div>
-                  WebSocket Messages
-                </h3>
-              </div>
-              <div className="p-3">
-                <WsTable
-                  rows={wsRows}
-                  baseUrl={wsBaseUrl}
-                  filter={searchTerm}
-                  onView={openPanel}
-                />
-              </div>
-            </motion.div>
+            {/* WebSocket Table Section - Only show if there are WS rows */}
+            {currentWsRows.length > 0 && (
+              <motion.div
+                className="bg-white rounded-lg border border-slate-200 overflow-hidden"
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.3, delay: 0.3 }}
+              >
+                <div className="px-3 py-2 bg-slate-50 border-b border-slate-200">
+                  <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+                    <div className="w-1.5 h-1.5 bg-blue-500 rounded-full"></div>
+                    WebSocket Messages ({currentWsRows.length})
+                    {showAllNetworkCalls ? " - All messages" : " - Filtered messages"}
+                  </h3>
+                </div>
+                <div className="table-container-with-sticky">
+                  <WsTable
+                    rows={currentWsRows}
+                    baseUrl={wsBaseUrl}
+                    filter={searchTerm}
+                    onView={openPanel}
+                    selectedRowId={selectedRowId}
+                  />
+                </div>
+              </motion.div>
+            )}
           </motion.div>
         </motion.div>
       </AnimatePresence>
+
+      {/* Resizable Divider */}
+      {panelOpen && (
+        <div
+          className={`w-1 bg-slate-300 hover:bg-slate-400 cursor-col-resize transition-colors duration-200 relative group ${
+            isResizing ? 'bg-slate-400' : ''
+          }`}
+          onMouseDown={handleMouseDown}
+        >
+          <div className="absolute inset-y-0 -left-1 -right-1 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="w-1 h-8 bg-slate-500 rounded-full"></div>
+          </div>
+        </div>
+      )}
 
       {/* Right Panel with Animation */}
       <AnimatePresence>
         {panelOpen && (
           <motion.div
             ref={panelRef}
-            className="w-2/5 h-full border-l border-slate-200 shadow-lg"
+            className="h-full border-l border-slate-200 shadow-lg"
+            style={{ width: `${100 - leftPanelWidth}%` }}
             initial={{ x: "100%" }}
             animate={{ x: 0 }}
             exit={{ x: "100%" }}

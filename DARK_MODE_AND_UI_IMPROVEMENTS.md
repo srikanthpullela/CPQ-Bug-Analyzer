@@ -1,7 +1,7 @@
 # Dark Mode and UI Improvements Summary
 
 ## Overview
-Completed comprehensive dark mode support and UI improvements for better usability and visual appeal in the CPQ Bug Analyzer application.
+Completed comprehensive dark mode support and UI improvements for better usability and visual appeal in the Conga Bug Analyzer application.
 
 ## Key Improvements Made
 
