@@ -26,7 +26,7 @@ export const CodePieces: React.FC = () => {
   const [newPiece, setNewPiece] = useState({
     title: "",
     code: "",
-    language: "javascript"
+    language: "text"  // Changed default from "javascript" to "text"
   });
 
   // Safe localStorage operations with error handling
@@ -174,7 +174,7 @@ export const CodePieces: React.FC = () => {
     }
 
     setPieces(newPieces);
-    setNewPiece({ title: "", code: "", language: "javascript" });
+    setNewPiece({ title: "", code: "", language: "text" });
     setShowNewPiece(false);
   };
 
@@ -269,11 +269,49 @@ export const CodePieces: React.FC = () => {
   };
 
   const languages = [
-    "javascript", "typescript", "python", "java", "csharp", "css", "html", 
+    "text", "javascript", "typescript", "python", "java", "csharp", "css", "html", 
     "sql", "json", "xml", "bash", "powershell", "apex", "other"
   ];
 
   const storageInfo = getStorageInfo();
+
+  // Add function to format text with basic highlighting
+  const formatCodeContent = (code: string, language: string) => {
+    if (language === "text") {
+      return code
+        // Highlight URLs
+        .replace(
+          /(https?:\/\/[^\s]+)/g,
+          '<span class="text-blue-600 underline">$1</span>'
+        )
+        // Highlight email addresses
+        .replace(
+          /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g,
+          '<span class="text-blue-600 underline">$1</span>'
+        )
+        // Highlight headers (lines starting with #)
+        .replace(
+          /^(#{1,6}\s+.*)$/gm,
+          '<span class="text-gray-800 font-bold">$1</span>'
+        )
+        // Highlight bold text (**text**)
+        .replace(
+          /\*\*(.*?)\*\*/g,
+          '<span class="font-bold">$1</span>'
+        )
+        // Highlight italic text (*text*)
+        .replace(
+          /\*(.*?)\*/g,
+          '<span class="italic">$1</span>'
+        )
+        // Highlight code blocks (`code`)
+        .replace(
+          /`([^`]+)`/g,
+          '<span class="bg-gray-100 px-1 rounded font-mono text-sm">$1</span>'
+        );
+    }
+    return code;
+  };
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-blue-50">
@@ -582,7 +620,7 @@ export const CodePieces: React.FC = () => {
                       </div>
                       <div>
                         <label className="block text-sm font-medium text-slate-700 mb-2">
-                          Language
+                          Type
                         </label>
                         <select
                           value={newPiece.language}
@@ -593,7 +631,7 @@ export const CodePieces: React.FC = () => {
                         >
                           {languages.map((lang) => (
                             <option key={lang} value={lang}>
-                              {lang.charAt(0).toUpperCase() + lang.slice(1)}
+                              {lang === "text" ? "Text" : lang.charAt(0).toUpperCase() + lang.slice(1)}
                             </option>
                           ))}
                         </select>
@@ -602,7 +640,7 @@ export const CodePieces: React.FC = () => {
 
                     <div>
                       <label className="block text-sm font-medium text-slate-700 mb-2">
-                        Code
+                        Content
                       </label>
                       <textarea
                         value={newPiece.code}
@@ -724,6 +762,38 @@ const CodePieceCard: React.FC<CodePieceCardProps> = ({
     onSave(editData);
   };
 
+  // Add function to format text content
+  const formatCodeContent = (code: string, language: string) => {
+    if (language === "text") {
+      return code
+        .replace(
+          /(https?:\/\/[^\s]+)/g,
+          '<span class="text-blue-600 underline cursor-pointer">$1</span>'
+        )
+        .replace(
+          /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/g,
+          '<span class="text-blue-600 underline">$1</span>'
+        )
+        .replace(
+          /^(#{1,6}\s+.*)$/gm,
+          '<span class="text-gray-800 font-bold text-lg">$1</span>'
+        )
+        .replace(
+          /\*\*(.*?)\*\*/g,
+          '<span class="font-bold">$1</span>'
+        )
+        .replace(
+          /\*(.*?)\*/g,
+          '<span class="italic">$1</span>'
+        )
+        .replace(
+          /`([^`]+)`/g,
+          '<span class="bg-gray-100 px-1 rounded font-mono text-sm">$1</span>'
+        );
+    }
+    return code;
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, y: 20 }}
@@ -750,7 +820,7 @@ const CodePieceCard: React.FC<CodePieceCardProps> = ({
             >
               {languages.map((lang) => (
                 <option key={lang} value={lang}>
-                  {lang.charAt(0).toUpperCase() + lang.slice(1)}
+                  {lang === "text" ? "Text" : lang.charAt(0).toUpperCase() + lang.slice(1)}
                 </option>
               ))}
             </select>
@@ -814,7 +884,7 @@ const CodePieceCard: React.FC<CodePieceCardProps> = ({
             </div>
             <div className="flex items-center gap-4 text-sm text-slate-500">
               <span className="bg-slate-100 px-2 py-1 rounded-md font-medium">
-                {piece.language}
+                {piece.language === "text" ? "Text" : piece.language}
               </span>
               <span>Created: {formatDate(piece.createdAt)}</span>
               {piece.updatedAt !== piece.createdAt && (
@@ -824,9 +894,18 @@ const CodePieceCard: React.FC<CodePieceCardProps> = ({
           </div>
 
           <div className="p-6">
-            <pre className="bg-slate-50 rounded-lg p-4 text-sm font-mono overflow-x-auto border border-slate-200 max-h-96 overflow-y-auto">
-              <code>{piece.code}</code>
-            </pre>
+            {piece.language === "text" ? (
+              <div 
+                className="bg-slate-50 rounded-lg p-4 text-sm border border-slate-200 max-h-96 overflow-y-auto whitespace-pre-wrap break-words"
+                dangerouslySetInnerHTML={{ 
+                  __html: formatCodeContent(piece.code, piece.language)
+                }}
+              />
+            ) : (
+              <pre className="bg-slate-50 rounded-lg p-4 text-sm font-mono overflow-x-auto border border-slate-200 max-h-96 overflow-y-auto">
+                <code>{piece.code}</code>
+              </pre>
+            )}
           </div>
         </>
       )}

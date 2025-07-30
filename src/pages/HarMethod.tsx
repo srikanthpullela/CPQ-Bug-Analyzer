@@ -15,7 +15,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { CSSTransition } from "react-transition-group";
 import "../style.css";
 import { UploadHistoryList } from "./components/UploadHistoryList";
-import { Activity, History, Search, FileText, Zap } from "lucide-react";
+import { Activity, History, Search, FileText, Zap, ArrowLeft, Home } from "lucide-react";
 import HarQueryComponent from "./HarQueryComponent";
 import { v4 as uuidv4 } from "uuid";
 
@@ -38,6 +38,7 @@ interface HarEntry {
 
 const HarMethodsPage: React.FC = () => {
   const { httpRows, wsRows, wsBaseUrl, parseAndPopulateTables } = useHar();
+  // The httpRows contain the auto-tracked HTTP calls
   const { buildHistory } = useFieldHistory(httpRows, wsRows);
 
   const [harText, setHarText] = useState("");
@@ -558,7 +559,7 @@ const HarMethodsPage: React.FC = () => {
           exit={{ opacity: 0 }}
           transition={{ duration: 0.3, ease: "easeOut" }}
         >
-          {/* Compact Navigation */}
+          {/* Updated Navigation to match pattern */}
           <nav className="bg-white border-b border-slate-200 px-4 py-2 flex-shrink-0 sticky top-0 z-10">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-4 text-sm">
@@ -566,8 +567,9 @@ const HarMethodsPage: React.FC = () => {
                   to="/"
                   className="text-slate-600 hover:text-indigo-600 transition-colors flex items-center gap-1"
                 >
-                  <FileText className="w-3 h-3" />
-                  Home
+                  <ArrowLeft className="w-4 h-4" />
+                  <Home className="w-4 h-4" />
+                  <span>Back to Home</span>
                 </Link>
                 <span className="text-slate-300">|</span>
                 <Link
@@ -576,6 +578,27 @@ const HarMethodsPage: React.FC = () => {
                 >
                   <Activity className="w-3 h-3" />
                   Formatter
+                </Link>
+                <span className="text-slate-300">|</span>
+                <Link
+                  to="/compare"
+                  className="text-slate-600 hover:text-indigo-600 transition-colors"
+                >
+                  Compare
+                </Link>
+                <span className="text-slate-300">|</span>
+                <Link
+                  to="/pieces"
+                  className="text-slate-600 hover:text-indigo-600 transition-colors"
+                >
+                  Pieces
+                </Link>
+                <span className="text-slate-300">|</span>
+                <Link
+                  to="/log"
+                  className="text-slate-600 hover:text-indigo-600 transition-colors"
+                >
+                  Log
                 </Link>
               </div>
               <div className="flex items-center gap-1 text-xs text-slate-500 bg-slate-100 px-2 py-1 rounded">
@@ -678,10 +701,7 @@ const HarMethodsPage: React.FC = () => {
               <div className="flex items-center gap-3 mb-3">
                 <div className="flex-1 relative">
                   <Search className="absolute left-2 top-1/2 pl-3 transform -translate-y-1/2 w-3 h-3 text-slate-400" />
-                  <SearchInput
-                    value={searchTerm}
-                    onChange={setSearchTerm}
-                  />
+                  <SearchInput value={searchTerm} onChange={setSearchTerm} />
                 </div>
                 <motion.button
                   className="px-3 py-1.5 bg-gradient-to-r from-indigo-500 to-purple-600 text-white text-sm font-medium rounded-lg hover:shadow-sm transition-all duration-200 flex items-center gap-1"
@@ -720,13 +740,16 @@ const HarMethodsPage: React.FC = () => {
                     </span>
                   </label>
                   <span className="text-xs text-slate-500">
-                    {showAllNetworkCalls 
-                      ? `Showing ${currentHttpRows.length + currentWsRows.length} total calls`
-                      : `Showing ${currentHttpRows.length + currentWsRows.length} filtered calls`
-                    }
+                    {showAllNetworkCalls
+                      ? `Showing ${
+                          currentHttpRows.length + currentWsRows.length
+                        } total calls`
+                      : `Showing ${
+                          currentHttpRows.length + currentWsRows.length
+                        } filtered calls`}
                   </span>
                 </div>
-                
+
                 {showAllNetworkCalls && (
                   <button
                     onClick={loadAllNetworkCalls}
@@ -748,8 +771,9 @@ const HarMethodsPage: React.FC = () => {
               <div className="px-3 py-2 bg-slate-50 border-b border-slate-200">
                 <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
                   <div className="w-1.5 h-1.5 bg-green-500 rounded-full"></div>
-                  Network Calls ({currentHttpRows.length} total) - 
-                  {showAllNetworkCalls ? " All calls" : " Filtered calls"} - Headers shown when available
+                  Network Calls ({currentHttpRows.length} total) -
+                  {showAllNetworkCalls ? " All calls" : " Filtered calls"} -
+                  Headers shown when available
                 </h3>
               </div>
               <div className="table-container-with-sticky">
@@ -775,7 +799,9 @@ const HarMethodsPage: React.FC = () => {
                   <h3 className="text-sm font-semibold text-slate-800 flex items-center gap-2">
                     <div className="w-1.5 h-1.5 bg-blue-500 rounded-full"></div>
                     WebSocket Messages ({currentWsRows.length})
-                    {showAllNetworkCalls ? " - All messages" : " - Filtered messages"}
+                    {showAllNetworkCalls
+                      ? " - All messages"
+                      : " - Filtered messages"}
                   </h3>
                 </div>
                 <div className="table-container-with-sticky">
@@ -797,7 +823,7 @@ const HarMethodsPage: React.FC = () => {
       {panelOpen && (
         <div
           className={`w-1 bg-slate-300 hover:bg-slate-400 cursor-col-resize transition-colors duration-200 relative group ${
-            isResizing ? 'bg-slate-400' : ''
+            isResizing ? "bg-slate-400" : ""
           }`}
           onMouseDown={handleMouseDown}
         >

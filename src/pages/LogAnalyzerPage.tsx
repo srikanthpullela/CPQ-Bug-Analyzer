@@ -5,6 +5,7 @@ import { useState, useEffect, useMemo } from "react";
 import "./LogAnalyzerPage.css";
 import { LogEntry, parseLogFile } from "../utils/log-parser";
 import { Link } from "react-router-dom";
+import { ArrowLeft, Home } from "lucide-react";
 
 interface ExceptionEntry {
   exception: string;
@@ -175,35 +176,38 @@ export default function LogAnalyzerPage() {
 
   return (
     <div className="log-analyzer-container">
-      <nav className="bg-white shadow-sm border-b px-6 py-3 flex-shrink-0">
-        <div className="flex items-center space-x-4 text-sm">
-          <Link
-            to="/"
-            className="text-blue-600 hover:text-blue-800 transition-colors"
-          >
-            Home
-          </Link>
-          <span className="text-gray-400">|</span>
-          {/* <Link
-            to="/sfdc"
-            className="text-blue-600 hover:text-blue-800 transition-colors"
-          >
-            SFDC
-          </Link>
-          <span className="text-gray-400">|</span>
-          <Link
-            to="/turbo"
-            className="text-blue-600 hover:text-blue-800 transition-colors"
-          >
-            Turbo
-          </Link>
-          <span className="text-gray-400">|</span> */}
-          <Link
-            to="/formatter"
-            className="text-blue-600 hover:text-blue-800 transition-colors"
-          >
-            Formatter
-          </Link>
+      <nav className="bg-white border-b border-slate-200 px-6 py-4 sticky top-0 z-30 shadow-sm">
+        <div className="mx-auto flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <Link
+              to="/"
+              className="flex items-center gap-2 text-slate-600 hover:text-blue-600 transition-colors font-medium"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <Home className="w-4 h-4" />
+              <span>Back to Home</span>
+            </Link>
+            <span className="text-slate-300">|</span>
+            <span className="text-slate-700 font-medium">Log Analyzer</span>
+            <Link
+              to="/formatter"
+              className="text-slate-600 hover:text-blue-600 transition-colors"
+            >
+              Formatter
+            </Link>
+            <Link
+              to="/compare"
+              className="text-slate-600 hover:text-blue-600 transition-colors"
+            >
+              Compare
+            </Link>
+            <Link
+              to="/har"
+              className="text-slate-600 hover:text-blue-600 transition-colors"
+            >
+              HAR
+            </Link>
+          </div>
         </div>
       </nav>
       <div className="log-analyzer-content">

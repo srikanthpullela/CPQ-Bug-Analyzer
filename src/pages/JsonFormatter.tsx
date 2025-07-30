@@ -313,24 +313,31 @@ const JsonFormatter: React.FC = () => {
           </Link>
           <span className="text-gray-400">|</span>
           <Link
-            to="/sfdc"
+            to="/compare"
             className="text-blue-600 hover:text-blue-800 transition-colors"
           >
-            SFDC
+            Compare
           </Link>
           <span className="text-gray-400">|</span>
           <Link
-            to="/turbo"
+            to="/pieces"
             className="text-blue-600 hover:text-blue-800 transition-colors"
           >
-            Turbo
+            Pieces
           </Link>
           <span className="text-gray-400">|</span>
           <Link
-            to="/formatter"
+            to="/har"
             className="text-blue-600 hover:text-blue-800 transition-colors"
           >
-            Formatter
+            HAR
+          </Link>
+          <span className="text-gray-400">|</span>
+          <Link
+            to="/log"
+            className="text-blue-600 hover:text-blue-800 transition-colors"
+          >
+            Log
           </Link>
         </div>
       </nav>
