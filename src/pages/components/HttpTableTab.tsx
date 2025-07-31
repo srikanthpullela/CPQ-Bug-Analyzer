@@ -15,6 +15,7 @@ export interface HttpRow {
   httpMethod?: string;
   endpoint?: string;
   displayName?: string;
+  hasMessages?: boolean; // Add this for error detection
 }
 
 interface Props {
@@ -114,6 +115,35 @@ export const HttpTableTab: React.FC<Props> = ({
   });
 
   function getRowColorClass(gr: any): string {
+    // First check HTTP status codes for errors
+    if (gr.status !== null && typeof gr.status === 'number') {
+      if (gr.status >= 500) {
+        // Server errors (5xx) - Red
+        return isDarkMode 
+          ? "bg-red-900 border-l-4 border-red-500" 
+          : "bg-red-100 border-l-4 border-red-500";
+      } else if (gr.status >= 400) {
+        // Client errors (4xx) - Orange/Red
+        return isDarkMode 
+          ? "bg-orange-900 border-l-4 border-orange-500" 
+          : "bg-orange-100 border-l-4 border-orange-500";
+      } else if (gr.status >= 300) {
+        // Redirects (3xx) - Yellow
+        return isDarkMode 
+          ? "bg-yellow-900 border-l-4 border-yellow-500" 
+          : "bg-yellow-100 border-l-4 border-yellow-500";
+      }
+      // 2xx and 1xx are considered successful, continue to other checks
+    }
+
+    // Check if we have the new hasMessages property from error detection
+    if (gr.hasMessages) {
+      return isDarkMode 
+        ? "bg-red-900 border-l-4 border-red-500" 
+        : "bg-red-100 border-l-4 border-red-500";
+    }
+
+    // Fallback to legacy pageErrors check for backward compatibility
     const pageErrors =
       gr?.lastResponsePayload?.[0]?.result?.pageErrors ||
       gr?.lastResponsePayload?.result?.pageErrors;
@@ -148,6 +178,48 @@ export const HttpTableTab: React.FC<Props> = ({
 
     return "";
   }
+
+  // Add function to get status badge styling
+  const getStatusBadgeClass = (status: number | null): string => {
+    if (status === null) return isDarkMode ? 'bg-gray-700 text-gray-300' : 'bg-gray-100 text-gray-600';
+    
+    if (status >= 200 && status < 300) {
+      return isDarkMode 
+        ? 'bg-green-800 text-green-200 border-green-600' 
+        : 'bg-green-100 text-green-800 border-green-200';
+    } else if (status >= 300 && status < 400) {
+      return isDarkMode 
+        ? 'bg-yellow-800 text-yellow-200 border-yellow-600' 
+        : 'bg-yellow-100 text-yellow-800 border-yellow-200';
+    } else if (status >= 400 && status < 500) {
+      return isDarkMode 
+        ? 'bg-orange-800 text-orange-200 border-orange-600' 
+        : 'bg-orange-100 text-orange-800 border-orange-200';
+    } else if (status >= 500) {
+      return isDarkMode 
+        ? 'bg-red-800 text-red-200 border-red-600' 
+        : 'bg-red-100 text-red-800 border-red-200';
+    }
+    
+    return isDarkMode ? 'bg-gray-700 text-gray-300 border-gray-600' : 'bg-gray-100 text-gray-600 border-gray-200';
+  };
+
+  // Add function to get status text for tooltips
+  const getStatusText = (status: number | null): string => {
+    if (status === null) return 'No status';
+    
+    if (status >= 200 && status < 300) {
+      return 'Success';
+    } else if (status >= 300 && status < 400) {
+      return 'Redirect';
+    } else if (status >= 400 && status < 500) {
+      return 'Client Error';
+    } else if (status >= 500) {
+      return 'Server Error';
+    }
+    
+    return 'Unknown';
+  };
 
   const displayRows = order.map((key) => groups[key]);
 
@@ -271,7 +343,18 @@ export const HttpTableTab: React.FC<Props> = ({
                 isDarkMode 
                   ? "text-gray-200" 
                   : "text-gray-700"
-              }`}>{gr.status ?? "–"}</td>
+              }`}>
+                {gr.status !== null ? (
+                  <span
+                    className={`inline-block px-2 py-1 text-xs font-medium rounded border ${getStatusBadgeClass(gr.status)}`}
+                    title={`${gr.status} - ${getStatusText(gr.status)}`}
+                  >
+                    {gr.status}
+                  </span>
+                ) : (
+                  <span className={isDarkMode ? "text-gray-400" : "text-gray-400"}>–</span>
+                )}
+              </td>
               <td className={`px-3 py-1 text-sm transition-colors duration-200 ${
                 isDarkMode 
                   ? "text-gray-200" 

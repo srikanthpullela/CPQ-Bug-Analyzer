@@ -58,6 +58,7 @@ export interface HttpRow {
   httpMethod?: string;
   endpoint?: string;
   displayName?: string;
+  hasMessages?: boolean; // <-- Added flag for error detection
 }
 
 export interface WsRow {
@@ -124,6 +125,10 @@ export function useLiveHar() {
             const time = formatTime(rawDate);
             const startTime = rawDate.getTime();
             const endTime = payload.endTime ?? Date.now();
+            
+            // Detect errors based on status code
+            const hasMessages = payload.status && (payload.status >= 400);
+            
             console.log("Pushing HTTP row", payload.method, time);
             setHttpRows((prev) => [
               ...prev,
@@ -141,6 +146,7 @@ export function useLiveHar() {
                 httpMethod: payload.httpMethod,
                 endpoint: payload.endpoint,
                 displayName: payload.displayName,
+                hasMessages, // Add error flag based on status
               },
             ]);
           } else {
@@ -157,6 +163,10 @@ export function useLiveHar() {
             const time = formatTime(rawDate);
             const startTime = rawDate.getTime();
             const endTime = payload.endTime ?? Date.now();
+            
+            // Detect errors for APEXREMOTE as well
+            const hasMessages = payload.status && (payload.status >= 400);
+            
             console.log("Pushing legacy APEXREMOTE row", payload.method, time);
             setHttpRows((prev) => [
               ...prev,
@@ -174,52 +184,22 @@ export function useLiveHar() {
                 httpMethod: payload.httpMethod,
                 endpoint: payload.endpoint,
                 displayName: payload.displayName,
+                hasMessages, // Add error flag
               },
             ]);
-          } else {
-            console.warn(
-              "[useLiveHar] APEXREMOTE payload missing method:",
-              payload
-            );
           }
           break;
 
-        case "WS":
-          try {
-            const direction = payload.direction || "received";
-            const endpoint = payload.endpoint || "(unknown)";
-            const action = payload.action || "";
-            const tsMs = Number(payload.timestamp) || Date.now();
-
-            const time = new Date(tsMs).toLocaleTimeString("en-GB", {
-              hour: "2-digit",
-              minute: "2-digit",
-              second: "2-digit",
-              timeZone: "Asia/Kolkata",
-            });
-
-            setWsRows((prev) => [
-              ...prev,
-              {
-                endpoint,
-                action,
-                payload: payload.payload,
-                status: payload.status ?? null,
-                time,
-                timestamp: tsMs,
-                direction,
-              },
-            ]);
-          } catch (err) {
-            console.warn("[useLiveHar] Failed to process WS row:", err);
-          }
-          break;
         case "INITIAL_HTTP_REQUEST":
           if (payload?.method) {
             const rawDate = new Date(payload.timestamp);
             const time = formatTime(rawDate);
             const startTime = rawDate.getTime();
             const endTime = payload.endTime ?? Date.now();
+            
+            // Add error detection for initial HTTP requests
+            const hasMessages = payload.status && (payload.status >= 400);
+            
             setHttpRows((prev) => [
               ...prev,
               {
@@ -236,6 +216,7 @@ export function useLiveHar() {
                 httpMethod: payload.httpMethod,
                 endpoint: payload.endpoint,
                 displayName: payload.displayName,
+                hasMessages, // Add error detection
               },
             ]);
           }
@@ -247,6 +228,10 @@ export function useLiveHar() {
             const time = formatTime(rawDate);
             const startTime = rawDate.getTime();
             const endTime = payload.endTime ?? Date.now();
+            
+            // Add error detection for initial HAR
+            const hasMessages = payload.status && (payload.status >= 400);
+            
             setHttpRows((prev) => [
               ...prev,
               {
@@ -263,6 +248,7 @@ export function useLiveHar() {
                 httpMethod: payload.httpMethod,
                 endpoint: payload.endpoint,
                 displayName: payload.displayName,
+                hasMessages, // Add error detection
               },
             ]);
           }
@@ -386,7 +372,7 @@ export function useLiveHar() {
                       method = (req as any).method || "(unknown)";
                     } else if (patternType === 'http') {
                       endpoint = extractEndpointFromUrl(entry.request.url);
-                      method = `${requestHttpMethod} ${endpoint}`;
+                      method = `${endpoint}`;
                     } else {
                       method = (req as any).method || requestHttpMethod || "(unknown)";
                     }
@@ -395,6 +381,9 @@ export function useLiveHar() {
                     patternType = 'generic';
                     httpMethod = requestHttpMethod;
                   }
+
+                  // Detect errors based on status code when processing HAR entries
+                  const hasMessages = entry.response.status && (entry.response.status >= 400);
 
                   freshRows.push({
                     method,
@@ -409,6 +398,7 @@ export function useLiveHar() {
                     patternType: patternType as 'apex' | 'http' | 'generic',
                     httpMethod,
                     endpoint,
+                    hasMessages, // Add error detection for HAR entries
                   });
 
                   completed++;
