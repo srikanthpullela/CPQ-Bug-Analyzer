@@ -22,6 +22,7 @@ export default function CompareJsonPage() {
   const [showDiff, setShowDiff] = useState(false);
   const [changeMarkers, setChangeMarkers] = useState<ChangeMarker[]>([]);
   const [currentChangeIndex, setCurrentChangeIndex] = useState(-1);
+  const [searchFilter, setSearchFilter] = useState("");
 
   // Add resizable panels state
   const [rightPanelWidth, setRightPanelWidth] = useState(25); // percentage for changes navigator
@@ -193,22 +194,38 @@ export default function CompareJsonPage() {
   };
 
   const navigateChanges = (direction: "next" | "prev") => {
-    if (changeMarkers.length === 0) return;
+    const filteredMarkers = getFilteredMarkers();
+    if (filteredMarkers.length === 0) return;
+
+    // Find current index in filtered results
+    const currentFilteredIndex = filteredMarkers.findIndex(marker => 
+      changeMarkers.indexOf(marker) === currentChangeIndex
+    );
 
     let newIndex;
     if (direction === "next") {
-      newIndex =
-        currentChangeIndex < changeMarkers.length - 1
-          ? currentChangeIndex + 1
-          : 0;
+      const nextFilteredIndex = currentFilteredIndex < filteredMarkers.length - 1
+        ? currentFilteredIndex + 1
+        : 0;
+      newIndex = changeMarkers.indexOf(filteredMarkers[nextFilteredIndex]);
     } else {
-      newIndex =
-        currentChangeIndex > 0
-          ? currentChangeIndex - 1
-          : changeMarkers.length - 1;
+      const prevFilteredIndex = currentFilteredIndex > 0
+        ? currentFilteredIndex - 1
+        : filteredMarkers.length - 1;
+      newIndex = changeMarkers.indexOf(filteredMarkers[prevFilteredIndex]);
     }
 
     scrollToChange(newIndex);
+  };
+
+  const getFilteredMarkers = () => {
+    if (!searchFilter.trim()) return changeMarkers;
+    
+    const searchTerm = searchFilter.toLowerCase();
+    return changeMarkers.filter(marker => 
+      marker.content.toLowerCase().includes(searchTerm) ||
+      marker.type.toLowerCase().includes(searchTerm)
+    );
   };
 
   const getScrollIndicatorPosition = () => {
@@ -555,12 +572,37 @@ export default function CompareJsonPage() {
                   <div className="p-4 border-b border-gray-200 bg-gray-100 flex-shrink-0">
                     <div className="flex items-center justify-between mb-2">
                       <h4 className="font-semibold text-gray-800 text-sm">
-                        Changes ({changeMarkers.length})
+                        Changes ({getFilteredMarkers().length}{searchFilter.trim() ? ` of ${changeMarkers.length}` : ""})
                       </h4>
                       <span className="text-xs text-gray-500">
                         {rightPanelWidth.toFixed(0)}% width
                       </span>
                     </div>
+                    
+                    {/* Search Filter */}
+                    <div className="mb-3">
+                      <input
+                        type="text"
+                        value={searchFilter}
+                        onChange={(e) => setSearchFilter(e.target.value)}
+                        placeholder="Search changes..."
+                        className="w-full px-3 py-1 text-sm border border-gray-300 rounded focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                      />
+                      {searchFilter.trim() && (
+                        <div className="flex items-center justify-between mt-1">
+                          <span className="text-xs text-gray-500">
+                            {getFilteredMarkers().length} results
+                          </span>
+                          <button
+                            onClick={() => setSearchFilter("")}
+                            className="text-xs text-blue-600 hover:text-blue-800"
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
                     <div className="flex gap-2">
                       <button
                         onClick={() => navigateChanges("prev")}
@@ -579,36 +621,48 @@ export default function CompareJsonPage() {
                     </div>
                   </div>
 
-                  <div className="flex-1 overflow-y-auto" style={{ height: 'calc(100% - 120px)' }}>
-                    {changeMarkers.map((marker, index) => (
-                      <button
-                        key={index}
-                        onClick={() => scrollToChange(index)}
-                        className={`change-navigator-item w-full p-3 text-left border-b border-gray-200 hover:bg-gray-100 transition-colors ${
-                          currentChangeIndex === index
-                            ? "bg-blue-100 border-blue-300 active"
-                            : ""
-                        }`}
-                        title={marker.content} // Show full content on hover
-                      >
-                        <div className="flex items-center gap-2 mb-1">
-                          <span
-                            className={`inline-block w-3 h-3 rounded-full flex-shrink-0 ${
-                              marker.type === "added" ? "bg-green-500" : "bg-red-500"
+                  <div className="flex-1 overflow-y-auto" style={{ height: 'calc(100% - 180px)' }}>
+                    {getFilteredMarkers().length === 0 && searchFilter.trim() ? (
+                      <div className="p-4 text-center text-gray-500 text-sm">
+                        No changes match your search
+                      </div>
+                    ) : (
+                      getFilteredMarkers().map((marker, filteredIndex) => {
+                        const originalIndex = changeMarkers.indexOf(marker);
+                        return (
+                          <button
+                            key={originalIndex}
+                            onClick={() => scrollToChange(originalIndex)}
+                            className={`change-navigator-item w-full p-3 text-left border-b border-gray-200 hover:bg-gray-100 transition-colors ${
+                              currentChangeIndex === originalIndex
+                                ? "bg-blue-100 border-blue-300 active"
+                                : ""
                             }`}
-                          />
-                          <span className="text-sm font-medium">
-                            {marker.type === "added" ? "Added" : "Removed"}
-                          </span>
-                          <span className="text-xs text-gray-500">
-                            L{marker.lineNumber + 1}
-                          </span>
-                        </div>
-                        <div className="text-xs text-gray-600 font-mono break-words whitespace-pre-wrap">
-                          {marker.content}
-                        </div>
-                      </button>
-                    ))}
+                          >
+                            <div className="flex items-center gap-2 mb-1">
+                              <span
+                                className={`inline-block w-3 h-3 rounded-full flex-shrink-0 ${
+                                  marker.type === "added" ? "bg-green-500" : "bg-red-500"
+                                }`}
+                              />
+                              <span className="text-sm font-medium">
+                                {marker.type === "added" ? "Added" : "Removed"}
+                              </span>
+                              <span className="text-xs text-gray-500">
+                                L{marker.lineNumber + 1}
+                              </span>
+                            </div>
+                            <div className="text-xs text-gray-600 font-mono break-words whitespace-pre-wrap">
+                              {searchFilter.trim() ? (
+                                <HighlightedText text={marker.content} highlight={searchFilter} />
+                              ) : (
+                                marker.content
+                              )}
+                            </div>
+                          </button>
+                        );
+                      })
+                    )}
                   </div>
 
                   {/* Quick resize buttons */}
@@ -788,27 +842,28 @@ export default function CompareJsonPage() {
           white-space: pre-wrap;
           word-wrap: break-word;
         }
-
-        /* Improved tooltip for full content */
-        .change-navigator-item[title]:hover::after {
-          content: attr(title);
-          position: absolute;
-          left: 100%;
-          top: 0;
-          background: rgba(0, 0, 0, 0.9);
-          color: white;
-          padding: 8px 12px;
-          border-radius: 4px;
-          font-size: 12px;
-          font-family: monospace;
-          white-space: pre-wrap;
-          max-width: 400px;
-          word-wrap: break-word;
-          z-index: 1000;
-          margin-left: 8px;
-          box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
-        }
       `}</style>
     </div>
   );
 }
+
+// Helper component to highlight search terms
+const HighlightedText = ({ text, highlight }: { text: string; highlight: string }) => {
+  if (!highlight.trim()) return <>{text}</>;
+  
+  const parts = text.split(new RegExp(`(${highlight.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'gi'));
+  
+  return (
+    <>
+      {parts.map((part, index) => 
+        part.toLowerCase() === highlight.toLowerCase() ? (
+          <span key={index} className="bg-yellow-200 font-semibold">
+            {part}
+          </span>
+        ) : (
+          part
+        )
+      )}
+    </>
+  );
+};

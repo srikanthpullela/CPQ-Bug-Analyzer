@@ -433,16 +433,48 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
           const totalTimeMs = entry.time || 0;
           const endTime = startTime + totalTimeMs;
 
-          let req = {};
-          try {
-            req = JSON.parse(entry.request.postData?.text || "{}");
-          } catch {}
-
           entry.getContent((content) => {
+            let req = {};
             let res = {};
+            
+            // Enhanced request processing
             try {
-              res = JSON.parse(content || "{}");
-            } catch {}
+              req = JSON.parse(entry.request.postData?.text || "{}");
+            } catch {
+              // Create a meaningful request object even if parsing fails
+              req = {
+                _method: entry.request.method,
+                _url: entry.request.url,
+                _headers: entry.request.headers || [],
+                _rawPostData: entry.request.postData?.text || '',
+                _queryString: entry.request.queryString || []
+              };
+            }
+
+            // Enhanced response processing to match live monitoring
+            if (content && content.trim()) {
+              try {
+                res = JSON.parse(content);
+              } catch {
+                res = { 
+                  _rawContent: content,
+                  _status: entry.response.status,
+                  _statusText: entry.response.statusText || '',
+                  _contentLength: content.length,
+                  _mimeType: entry.response.content?.mimeType || 'unknown'
+                };
+              }
+            } else {
+              // Create a meaningful response object even if no content
+              res = { 
+                _empty: true,
+                _status: entry.response.status,
+                _statusText: entry.response.statusText || '',
+                _headers: entry.response.headers || [],
+                _mimeType: entry.response.content?.mimeType || 'unknown',
+                _redirectURL: entry.response.redirectURL || ''
+              };
+            }
 
             const processedPayload = processRequestByPattern(
               { 
@@ -455,6 +487,9 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
               matchedPattern
             );
 
+            // Detect errors based on status code
+            const hasMessages = entry.response.status && (entry.response.status >= 400);
+
             panelWindow.postMessage(
               {
                 source: "HAR_EXTRACTOR",
@@ -464,8 +499,14 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
                   timestamp: startTime,
                   baseUrl: new URL(entry.request.url).origin,
                   endTime,
+                  hasMessages,
+                  // Always include header data for consistency
                   requestHeaders: entry.request.headers || [],
                   responseHeaders: entry.response?.headers || [],
+                  headers: {
+                    request: entry.request.headers || [],
+                    response: entry.response?.headers || []
+                  },
                 },
               },
               "*"
@@ -523,43 +564,67 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
       extractReq((reqJson) => {
         request.getContent((content) => {
           let resJson = {};
-          if (content) {
+          
+          // Enhanced response processing to match HAR reload behavior
+          if (content && content.trim()) {
             try {
               resJson = JSON.parse(content);
             } catch {
               resJson = { 
                 _rawContent: content,
-                _status: request.response?.status 
+                _status: request.response?.status,
+                _statusText: request.response?.statusText || '',
+                _contentLength: content.length
               };
             }
           } else {
+            // Even if no content, create a meaningful response object
             resJson = { 
               _empty: true,
-              _status: request.response?.status 
+              _status: request.response?.status,
+              _statusText: request.response?.statusText || '',
+              _headers: request.response?.headers || [],
+              _mimeType: request.response?.content?.mimeType || 'unknown'
             };
           }
 
-          // Generate method name
-          const httpMethod = request.request.method || 'GET';
-          const endpoint = extractEndpointFromUrl(request.request.url);
-          const method = reqJson.method || reqJson.action || `${httpMethod} ${endpoint}`;
+          const processedPayload = processRequestByPattern(
+            { 
+              request: request.request, 
+              response: request.response,
+              startedDateTime: new Date().toISOString()
+            }, 
+            reqJson, 
+            resJson, 
+            matchedPattern
+          );
+
+          // Detect errors based on status code
+          const hasMessages = request.response?.status && (request.response.status >= 400);
 
           panelWindow.postMessage(
             {
               source: "HAR_EXTRACTOR",
               type: "HTTP_REQUEST",
               payload: {
-                method,
-                requestPayload: reqJson,
-                responsePayload: resJson,
-                status: request.response?.status ?? null,
+                ...processedPayload,
                 timestamp: Date.now(),
                 endTime: Date.now(),
-                httpMethod,
-                endpoint,
-                url: request.request.url,
+                hasMessages,
+                // Always include header data for consistency
                 requestHeaders: request.request.headers || [],
-                responseHeaders: request.response?.headers || []
+                responseHeaders: request.response?.headers || [],
+                headers: {
+                  request: request.request.headers || [],
+                  response: request.response?.headers || []
+                },
+                // Add debug info to understand what's happening
+                _debug: {
+                  hasContent: !!content,
+                  contentLength: content?.length || 0,
+                  responseStatus: request.response?.status,
+                  responseHeaders: request.response?.headers?.length || 0
+                }
               },
             },
             "*"

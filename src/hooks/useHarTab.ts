@@ -51,14 +51,22 @@ export interface HttpRow {
   status: number | null;
   time: string;
   id: string;
-  startTime: number; // also use as timestamp for sorting
+  startTime: number;
   endTime?: number;
   urlPattern?: string;
   patternType?: 'apex' | 'http' | 'generic';
   httpMethod?: string;
   endpoint?: string;
   displayName?: string;
-  hasMessages?: boolean; // <-- Added flag for error detection
+  hasMessages?: boolean; // Add this for error detection
+  // Add header support
+  headers?: {
+    request?: any[];
+    response?: any[];
+  };
+  requestHeaders?: any[];
+  responseHeaders?: any[];
+  url?: string;
 }
 
 export interface WsRow {
@@ -134,8 +142,8 @@ export function useLiveHar() {
               ...prev,
               {
                 method: payload.method,
-                requestPayload: payload.requestPayload,
-                responsePayload: payload.responsePayload,
+                requestPayload: payload.requestPayload || { _noData: true, _method: payload.method },
+                responsePayload: payload.responsePayload || { _noData: true, _status: payload.status },
                 status: payload.status ?? null,
                 time,
                 startTime,
@@ -146,14 +154,57 @@ export function useLiveHar() {
                 httpMethod: payload.httpMethod,
                 endpoint: payload.endpoint,
                 displayName: payload.displayName,
-                hasMessages, // Add error flag based on status
+                hasMessages,
+                // Always include header data
+                requestHeaders: payload.requestHeaders || [],
+                responseHeaders: payload.responseHeaders || [],
+                headers: {
+                  request: payload.requestHeaders || [],
+                  response: payload.responseHeaders || []
+                },
+                url: payload.url,
               },
             ]);
-          } else {
-            console.warn(
-              "[useLiveHar] HTTP_REQUEST payload missing method:",
-              payload
-            );
+          }
+          break;
+
+        case "INITIAL_HTTP_REQUEST":
+          if (payload?.method) {
+            const rawDate = new Date(payload.timestamp);
+            const time = formatTime(rawDate);
+            const startTime = rawDate.getTime();
+            const endTime = payload.endTime ?? Date.now();
+            
+            // Add error detection for initial HTTP requests
+            const hasMessages = payload.status && (payload.status >= 400);
+            
+            setHttpRows((prev) => [
+              ...prev,
+              {
+                method: payload.method,
+                requestPayload: payload.requestPayload || { _noData: true, _method: payload.method },
+                responsePayload: payload.responsePayload || { _noData: true, _status: payload.status },
+                status: payload.status ?? null,
+                time,
+                startTime,
+                endTime,
+                id: uuidv4(),
+                urlPattern: payload.urlPattern,
+                patternType: payload.patternType,
+                httpMethod: payload.httpMethod,
+                endpoint: payload.endpoint,
+                displayName: payload.displayName,
+                hasMessages,
+                // Always include header data
+                requestHeaders: payload.requestHeaders || [],
+                responseHeaders: payload.responseHeaders || [],
+                headers: {
+                  request: payload.requestHeaders || [],
+                  response: payload.responseHeaders || []
+                },
+                url: payload.url || payload.baseUrl,
+              },
+            ]);
           }
           break;
 
@@ -185,53 +236,60 @@ export function useLiveHar() {
                 endpoint: payload.endpoint,
                 displayName: payload.displayName,
                 hasMessages, // Add error flag
+                // Add header data
+                requestHeaders: payload.requestHeaders || [],
+                responseHeaders: payload.responseHeaders || [],
+                headers: {
+                  request: payload.requestHeaders || [],
+                  response: payload.responseHeaders || []
+                },
+                url: payload.url,
               },
             ]);
+          } else {
+            console.warn(
+              "[useLiveHar] APEXREMOTE payload missing method:",
+              payload
+            );
           }
           break;
 
-        case "INITIAL_HTTP_REQUEST":
-          if (payload?.method) {
-            const rawDate = new Date(payload.timestamp);
-            const time = formatTime(rawDate);
-            const startTime = rawDate.getTime();
-            const endTime = payload.endTime ?? Date.now();
-            
-            // Add error detection for initial HTTP requests
-            const hasMessages = payload.status && (payload.status >= 400);
-            
-            setHttpRows((prev) => [
+        case "WS":
+          try {
+            const direction = payload.direction || "received";
+            const endpoint = payload.endpoint || "(unknown)";
+            const action = payload.action || "";
+            const tsMs = Number(payload.timestamp) || Date.now();
+
+            const time = new Date(tsMs).toLocaleTimeString("en-GB", {
+              hour: "2-digit",
+              minute: "2-digit",
+              second: "2-digit",
+              timeZone: "Asia/Kolkata",
+            });
+
+            setWsRows((prev) => [
               ...prev,
               {
-                method: payload.method,
-                requestPayload: payload.requestPayload,
-                responsePayload: payload.responsePayload,
+                endpoint,
+                action,
+                payload: payload.payload,
                 status: payload.status ?? null,
                 time,
-                startTime,
-                endTime,
-                id: uuidv4(),
-                urlPattern: payload.urlPattern,
-                patternType: payload.patternType,
-                httpMethod: payload.httpMethod,
-                endpoint: payload.endpoint,
-                displayName: payload.displayName,
-                hasMessages, // Add error detection
+                timestamp: tsMs,
+                direction,
               },
             ]);
+          } catch (err) {
+            console.warn("[useLiveHar] Failed to process WS row:", err);
           }
           break;
-
         case "INITIAL_HAR":
           if (payload?.method) {
             const rawDate = new Date(payload.timestamp);
             const time = formatTime(rawDate);
             const startTime = rawDate.getTime();
             const endTime = payload.endTime ?? Date.now();
-            
-            // Add error detection for initial HAR
-            const hasMessages = payload.status && (payload.status >= 400);
-            
             setHttpRows((prev) => [
               ...prev,
               {
@@ -249,6 +307,14 @@ export function useLiveHar() {
                 endpoint: payload.endpoint,
                 displayName: payload.displayName,
                 hasMessages, // Add error detection
+                // Always include header data (even if empty arrays)
+                requestHeaders: payload.requestHeaders || [],
+                responseHeaders: payload.responseHeaders || [],
+                headers: {
+                  request: payload.requestHeaders || [],
+                  response: payload.responseHeaders || []
+                },
+                url: payload.url || payload.baseUrl,
               },
             ]);
           }
@@ -398,7 +464,15 @@ export function useLiveHar() {
                     patternType: patternType as 'apex' | 'http' | 'generic',
                     httpMethod,
                     endpoint,
-                    hasMessages, // Add error detection for HAR entries
+                    hasMessages,
+                    // Always include header data for consistency
+                    requestHeaders: entry.request.headers || [],
+                    responseHeaders: entry.response?.headers || [],
+                    headers: {
+                      request: entry.request.headers || [],
+                      response: entry.response?.headers || []
+                    },
+                    url: entry.request.url,
                   });
 
                   completed++;

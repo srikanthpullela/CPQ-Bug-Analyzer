@@ -227,6 +227,12 @@ const Home: React.FC = () => {
                 placeholder="Filter..."
                 value={filterText}
                 onChange={(e) => setFilterText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    // Filtering is reactive, no additional action needed
+                  }
+                }}
                 className="sfdc-filter enhanced-filter"
               />
               <span className="filter-icon">🔍</span>

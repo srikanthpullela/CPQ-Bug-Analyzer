@@ -33,7 +33,7 @@ export const WsTable: React.FC<Props> = ({ rows, baseUrl, filter, onView, select
 
     const combined = `${r.time || ''} ${r.endpoint || ''} ${r.action || ''} ${safeStringify(
       r.payload
-    )} ${r.status || ''} ${r.direction || ''}`;
+    )} ${r.status || ''} ${r.direction || ''} ${r.id || ''}`;
     
     return !filter || combined.toLowerCase().includes(filter.toLowerCase());
   });

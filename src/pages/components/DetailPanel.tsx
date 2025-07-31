@@ -333,8 +333,52 @@ export const DetailPanel: React.FC<Props> = ({
     goToPrevMatch,
   ]);
 
-  // memoize so we only do this heavy walk once per data change
-  const parsedData = useMemo(() => deepParse(data), [data]);
+  // Enhanced function to format header data for better display
+  const formatHeaderData = (data: any) => {
+    // Check if this is header data
+    if (data && typeof data === 'object' && (data.requestHeaders || data.responseHeaders || data._info)) {
+      return {
+        _headerInfo: {
+          url: data.url || 'Unknown URL',
+          method: data.method || 'Unknown Method',
+          status: data.status || 'Unknown Status',
+          summary: data._info || {}
+        },
+        requestHeaders: data.requestHeaders || [],
+        responseHeaders: data.responseHeaders || [],
+        _formattedHeaders: {
+          request: formatHeadersArray(data.requestHeaders || []),
+          response: formatHeadersArray(data.responseHeaders || [])
+        }
+      };
+    }
+    return data;
+  };
+
+  // Helper function to format header arrays
+  const formatHeadersArray = (headers: any[]) => {
+    if (!Array.isArray(headers)) return {};
+    
+    const formatted: Record<string, string> = {};
+    headers.forEach((header, index) => {
+      if (header && typeof header === 'object') {
+        if (header.name && header.value !== undefined) {
+          formatted[header.name] = header.value;
+        } else {
+          formatted[`header_${index}`] = JSON.stringify(header);
+        }
+      } else {
+        formatted[`header_${index}`] = String(header);
+      }
+    });
+    return formatted;
+  };
+
+  // Enhanced parsed data with header formatting
+  const parsedData = useMemo(() => {
+    const deepParsed = deepParse(data);
+    return formatHeaderData(deepParsed);
+  }, [data]);
 
   // Get formatted JSON string
   const formattedJSON = useMemo(() => {
@@ -359,7 +403,7 @@ export const DetailPanel: React.FC<Props> = ({
     <div className={`h-full flex flex-col shadow-lg transition-colors duration-200 ${
       isDarkMode ? "bg-gray-800" : "bg-white"
     }`}>
-      {/* Header */}
+      {/* Header section */}
       <div className={`flex-shrink-0 border-b px-6 py-4 transition-colors duration-200 ${
         isDarkMode 
           ? "bg-gray-800 border-gray-700" 
@@ -370,7 +414,17 @@ export const DetailPanel: React.FC<Props> = ({
             isDarkMode ? "text-gray-100" : "text-gray-900"
           }`}>
             {title}
+            {/* Show header info if this is header data */}
+            {parsedData?._headerInfo && (
+              <div className={`text-xs mt-1 transition-colors duration-200 ${
+                isDarkMode ? "text-gray-400" : "text-gray-500"
+              }`}>
+                {parsedData._headerInfo.method} {parsedData._headerInfo.url} 
+                {parsedData._headerInfo.status && ` (${parsedData._headerInfo.status})`}
+              </div>
+            )}
           </span>
+          
           <div className="flex items-center gap-3">
             {/* Search Toggle Button - Only show when in Raw JSON view */}
             {!viewTree && (
@@ -636,42 +690,56 @@ export const DetailPanel: React.FC<Props> = ({
           </div>
         )}
 
-        {/* View Toggle */}
-        <div className="flex items-center space-x-6">
-          <label className="flex items-center cursor-pointer group">
-            <input
-              type="radio"
-              checked={viewTree}
-              onChange={() => onToggleView(true)}
-              className={`w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500 focus:ring-2 transition-colors duration-200 ${
-                isDarkMode ? "bg-gray-600" : "bg-gray-100"
-              }`}
-            />
-            <span className={`ml-3 text-sm font-medium transition-colors duration-200 ${
+        {/* Enhanced view toggle with header info */}
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-6">
+            <label className="flex items-center cursor-pointer group">
+              <input
+                type="radio"
+                checked={viewTree}
+                onChange={() => onToggleView(true)}
+                className={`w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500 focus:ring-2 transition-colors duration-200 ${
+                  isDarkMode ? "bg-gray-600" : "bg-gray-100"
+                }`}
+              />
+              <span className={`ml-3 text-sm font-medium transition-colors duration-200 ${
+                isDarkMode 
+                  ? "text-gray-300 group-hover:text-gray-100" 
+                  : "text-gray-700 group-hover:text-gray-900"
+              }`}>
+                Tree View
+              </span>
+            </label>
+            <label className="flex items-center cursor-pointer group">
+              <input
+                type="radio"
+                checked={!viewTree}
+                onChange={() => onToggleView(false)}
+                className={`w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500 focus:ring-2 transition-colors duration-200 ${
+                  isDarkMode ? "bg-gray-600" : "bg-gray-100"
+                }`}
+              />
+              <span className={`ml-3 text-sm font-medium transition-colors duration-200 ${
+                isDarkMode 
+                  ? "text-gray-300 group-hover:text-gray-100" 
+                  : "text-gray-700 group-hover:text-gray-900"
+              }`}>
+                Raw JSON
+              </span>
+            </label>
+          </div>
+          
+          {/* Show header summary if available */}
+          {parsedData?._headerInfo?.summary && (
+            <div className={`text-xs px-3 py-1 rounded-full transition-colors duration-200 ${
               isDarkMode 
-                ? "text-gray-300 group-hover:text-gray-100" 
-                : "text-gray-700 group-hover:text-gray-900"
+                ? "bg-purple-900 text-purple-200 border border-purple-700" 
+                : "bg-purple-100 text-purple-800 border border-purple-200"
             }`}>
-              Tree View
-            </span>
-          </label>
-          <label className="flex items-center cursor-pointer group">
-            <input
-              type="radio"
-              checked={!viewTree}
-              onChange={() => onToggleView(false)}
-              className={`w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500 focus:ring-2 transition-colors duration-200 ${
-                isDarkMode ? "bg-gray-600" : "bg-gray-100"
-              }`}
-            />
-            <span className={`ml-3 text-sm font-medium transition-colors duration-200 ${
-              isDarkMode 
-                ? "text-gray-300 group-hover:text-gray-100" 
-                : "text-gray-700 group-hover:text-gray-900"
-            }`}>
-              Raw JSON
-            </span>
-          </label>
+              Headers: {parsedData._headerInfo.summary.requestHeaderCount || 0} req, 
+              {parsedData._headerInfo.summary.responseHeaderCount || 0} resp
+            </div>
+          )}
         </div>
       </div>
       {/* Content */}
@@ -685,10 +753,7 @@ export const DetailPanel: React.FC<Props> = ({
         }`}>
           {viewTree ? (
             <div className="flex-1 min-h-0 p-4">
-              <div
-                className="h-full overflow-auto"
-                style={{ maxHeight: "100%" }}
-              >
+              <div className="h-full overflow-auto" style={{ maxHeight: "100%" }}>
                 <ReactJson
                   src={
                     typeof parsedData === "object"
@@ -696,15 +761,14 @@ export const DetailPanel: React.FC<Props> = ({
                       : { value: parsedData }
                   }
                   name={false}
-                  collapsed={2}
+                  collapsed={parsedData?._headerInfo ? 1 : 2} // Less collapsed for headers
                   enableClipboard={false}
                   displayDataTypes={false}
                   displayObjectSize={false}
                   indentWidth={2}
                   style={{
                     fontSize: "0.75rem",
-                    fontFamily:
-                      "monospace, ui-monospace, SFMono-Regular, 'SF Mono', Monaco, Consolas, 'Liberation Mono', 'Menlo'",
+                    fontFamily: "monospace, ui-monospace, SFMono-Regular, 'SF Mono', Monaco, Consolas, 'Liberation Mono', 'Menlo'",
                     backgroundColor: "transparent",
                     padding: "0",
                     maxHeight: "100%",

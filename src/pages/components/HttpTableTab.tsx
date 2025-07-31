@@ -1,5 +1,5 @@
 // src/components/HttpTableTab.tsx
-import React from "react";
+import React, { useState } from "react";
 
 export interface HttpRow {
   method: string;
@@ -15,7 +15,15 @@ export interface HttpRow {
   httpMethod?: string;
   endpoint?: string;
   displayName?: string;
-  hasMessages?: boolean; // Add this for error detection
+  hasMessages?: boolean;
+  // Add header support
+  headers?: {
+    request?: any[];
+    response?: any[];
+  };
+  requestHeaders?: any[];
+  responseHeaders?: any[];
+  url?: string;
 }
 
 interface Props {
@@ -35,10 +43,26 @@ export const HttpTableTab: React.FC<Props> = ({
   isDarkMode = false,
   headerTitle = "API Methods",
 }) => {
+  // Add state for showing headers buttons
+  const [showHeadersButtons, setShowHeadersButtons] = useState(false);
+
   const filtered = rows.filter((r) => {
-    const combined = `${r.time} ${r.method} ${JSON.stringify(
+    const safeStringify = (obj: any) => {
+      try {
+        return JSON.stringify(obj || {});
+      } catch {
+        return String(obj || '');
+      }
+    };
+
+    const combined = `${r.time} ${r.method} ${safeStringify(
       r.requestPayload
-    )} ${JSON.stringify(r.responsePayload)}`;
+    )} ${safeStringify(r.responsePayload)} ${safeStringify(
+      r.requestHeaders || []
+    )} ${safeStringify(r.responseHeaders || [])} ${safeStringify(
+      r.headers || {}
+    )} ${r.url || ''} ${r.httpMethod || ''} ${r.endpoint || ''} ${r.displayName || ''}`;
+    
     return !filter || combined.toLowerCase().includes(filter.toLowerCase());
   });
 
@@ -47,9 +71,10 @@ export const HttpTableTab: React.FC<Props> = ({
     time: string;
     method: string;
     status: number | null;
-    actions: Set<"Request" | "Response">;
+    actions: Set<"Request" | "Response" | "Headers">;
     lastRequestPayload?: any;
     lastResponsePayload?: any;
+    lastHeaders?: any;
     id?: string;
     startTime: number;
     endTime?: number;
@@ -58,6 +83,7 @@ export const HttpTableTab: React.FC<Props> = ({
     httpMethod?: string;
     endpoint?: string;
     displayName?: string;
+    hasMessages?: boolean;
   }
 
   const groups: Record<GroupKey, GroupedRow> = {};
@@ -100,18 +126,46 @@ export const HttpTableTab: React.FC<Props> = ({
         httpMethod: r.httpMethod,
         endpoint: r.endpoint,
         displayName: r.displayName,
+        hasMessages: r.hasMessages,
       };
       order.push(keyToUse);
     }
 
-    if (r.requestPayload && Object.keys(r.requestPayload).length > 0) {
-      groups[keyToUse].actions.add("Request");
-      groups[keyToUse].lastRequestPayload = r.requestPayload;
+    // Always add Request action - even if no payload, show method info
+    groups[keyToUse].actions.add("Request");
+    groups[keyToUse].lastRequestPayload = r.requestPayload || {
+      _method: r.httpMethod || r.method,
+      _url: r.url,
+      _noPayload: true,
+    };
+
+    // Always add Response action - even if no payload, show status info
+    groups[keyToUse].actions.add("Response");
+    groups[keyToUse].lastResponsePayload = r.responsePayload || {
+      _status: r.status,
+      _noPayload: true,
+      _message: r.status >= 400 ? 'Error Response' : 'Success Response'
+    };
+    
+    if (r.hasMessages) {
+      groups[keyToUse].hasMessages = true;
     }
-    if (r.responsePayload && Object.keys(r.responsePayload).length > 0) {
-      groups[keyToUse].actions.add("Response");
-      groups[keyToUse].lastResponsePayload = r.responsePayload;
-    }
+
+    // Add Headers action - Always add it since we always provide header arrays
+    groups[keyToUse].actions.add("Headers");
+    groups[keyToUse].lastHeaders = {
+      requestHeaders: r.requestHeaders || r.headers?.request || [],
+      responseHeaders: r.responseHeaders || r.headers?.response || [],
+      url: r.url || 'Unknown URL',
+      method: r.httpMethod || r.method || 'Unknown Method',
+      status: r.status,
+      _info: {
+        hasRequestHeaders: (r.requestHeaders?.length || r.headers?.request?.length || 0) > 0,
+        hasResponseHeaders: (r.responseHeaders?.length || r.headers?.response?.length || 0) > 0,
+        requestHeaderCount: r.requestHeaders?.length || r.headers?.request?.length || 0,
+        responseHeaderCount: r.responseHeaders?.length || r.headers?.response?.length || 0
+      }
+    };
   });
 
   function getRowColorClass(gr: any): string {
@@ -123,10 +177,10 @@ export const HttpTableTab: React.FC<Props> = ({
           ? "bg-red-900 border-l-4 border-red-500" 
           : "bg-red-100 border-l-4 border-red-500";
       } else if (gr.status >= 400) {
-        // Client errors (4xx) - Orange/Red
+        // Client errors (4xx) - Use inline styles for reliability
         return isDarkMode 
-          ? "bg-orange-900 border-l-4 border-orange-500" 
-          : "bg-orange-100 border-l-4 border-orange-500";
+          ? "border-l-4 border-orange-500" 
+          : "border-l-4 border-orange-500";
       } else if (gr.status >= 300) {
         // Redirects (3xx) - Yellow
         return isDarkMode 
@@ -193,8 +247,8 @@ export const HttpTableTab: React.FC<Props> = ({
         : 'bg-yellow-100 text-yellow-800 border-yellow-200';
     } else if (status >= 400 && status < 500) {
       return isDarkMode 
-        ? 'bg-orange-800 text-orange-200 border-orange-600' 
-        : 'bg-orange-100 text-orange-800 border-orange-200';
+        ? 'border-orange-600' 
+        : 'border-orange-200';
     } else if (status >= 500) {
       return isDarkMode 
         ? 'bg-red-800 text-red-200 border-red-600' 
@@ -202,6 +256,33 @@ export const HttpTableTab: React.FC<Props> = ({
     }
     
     return isDarkMode ? 'bg-gray-700 text-gray-300 border-gray-600' : 'bg-gray-100 text-gray-600 border-gray-200';
+  };
+
+  // Add function to get inline styles for problematic colors
+  const getRowInlineStyle = (gr: any): React.CSSProperties => {
+    if (gr.status !== null && typeof gr.status === 'number') {
+      if (gr.status >= 400 && gr.status < 500) {
+        return {
+          backgroundColor: isDarkMode ? '#7c2d12' : '#fed7aa', // orange-900 : orange-100
+        };
+      }
+    }
+    return {};
+  };
+
+  const getStatusInlineStyle = (status: number | null): React.CSSProperties => {
+    if (status !== null && status >= 400 && status < 500) {
+      return isDarkMode ? {
+        backgroundColor: '#9a3412', // orange-800
+        color: '#fed7aa', // orange-100
+        borderColor: '#ea580c', // orange-600
+      } : {
+        backgroundColor: '#fed7aa', // orange-100
+        color: '#9a3412', // orange-800
+        borderColor: '#fdba74', // orange-200
+      };
+    }
+    return {};
   };
 
   // Add function to get status text for tooltips
@@ -227,6 +308,8 @@ export const HttpTableTab: React.FC<Props> = ({
     <div className={`rounded overflow-x-auto transition-colors duration-200 ${
       isDarkMode ? "bg-gray-800" : "bg-white"
     }`}>
+      {/* Add hidden safelist classes to ensure Tailwind includes them */}
+      <div className="hidden bg-orange-100 text-orange-800 border-orange-200 bg-orange-900 text-orange-200 border-orange-600"></div>
       <h3 className={`p-2 font-semibold transition-colors duration-200 ${
         isDarkMode 
           ? "bg-gray-700 text-gray-100 border-b border-gray-600" 
@@ -273,7 +356,26 @@ export const HttpTableTab: React.FC<Props> = ({
               isDarkMode 
                 ? "text-gray-200" 
                 : "text-gray-700"
-            }`}>Actions</th>
+            }`}>
+              <div className="flex items-center justify-between">
+                <span>Actions</span>
+                <label className="flex items-center cursor-pointer ml-2">
+                  <input
+                    type="checkbox"
+                    checked={showHeadersButtons}
+                    onChange={(e) => setShowHeadersButtons(e.target.checked)}
+                    className={`w-3 h-3 text-indigo-600 border-gray-300 focus:ring-indigo-500 focus:ring-1 rounded ${
+                      isDarkMode ? "bg-gray-600" : "bg-gray-100"
+                    }`}
+                  />
+                  <span className={`ml-1 text-xs transition-colors duration-200 ${
+                    isDarkMode ? "text-gray-300" : "text-gray-600"
+                  }`}>
+                    Headers
+                  </span>
+                </label>
+              </div>
+            </th>
           </tr>
         </thead>
         <tbody>
@@ -298,6 +400,7 @@ export const HttpTableTab: React.FC<Props> = ({
                         ? "bg-gray-900 hover:bg-gray-600" 
                         : "bg-gray-50 hover:bg-gray-100")
               }`}
+              style={getRowInlineStyle(gr)}
             >
               <td className={`px-3 py-1 text-sm transition-colors duration-200 ${
                 isDarkMode 
@@ -347,6 +450,7 @@ export const HttpTableTab: React.FC<Props> = ({
                 {gr.status !== null ? (
                   <span
                     className={`inline-block px-2 py-1 text-xs font-medium rounded border ${getStatusBadgeClass(gr.status)}`}
+                    style={getStatusInlineStyle(gr.status)}
                     title={`${gr.status} - ${getStatusText(gr.status)}`}
                   >
                     {gr.status}
@@ -365,43 +469,47 @@ export const HttpTableTab: React.FC<Props> = ({
                   : "–"}
               </td>
               <td className={`px-3 py-1 space-x-1 flex transition-colors duration-200`}>
-                {Array.from(gr.actions).map((action) => (
-                  <button
-                    key={action}
-                    className={`px-2 py-0.5 text-xs font-medium text-white rounded transition-colors duration-200 ${
-                      action === "Request" 
-                        ? isDarkMode 
-                          ? "bg-indigo-600 hover:bg-indigo-500" 
-                          : "bg-indigo-500 hover:bg-indigo-600"
-                        : isDarkMode 
-                          ? "bg-indigo-800 hover:bg-indigo-700" 
-                          : "bg-indigo-700 hover:bg-indigo-800"
-                    }`}
-                    onClick={() =>
-                      onView(
-                        `http-${i}`,
-                        `${gr.method} ▶ ${action}`,
-                        action === "Request"
-                          ? gr.lastRequestPayload
-                          : gr.lastResponsePayload
-                      )
-                    }
-                  >
-                    {action}
-                  </button>
-                ))}
+                {Array.from(gr.actions).map((action) => {
+                  // Only show Headers button if checkbox is checked
+                  if (action === "Headers" && !showHeadersButtons) {
+                    return null;
+                  }
+                  
+                  return (
+                    <button
+                      key={action}
+                      className={`px-2 py-0.5 text-xs font-medium text-white rounded transition-colors duration-200 ${
+                        action === "Request" 
+                          ? isDarkMode 
+                            ? "bg-indigo-600 hover:bg-indigo-500" 
+                            : "bg-indigo-500 hover:bg-indigo-600"
+                          : action === "Response"
+                          ? isDarkMode 
+                            ? "bg-indigo-800 hover:bg-indigo-700" 
+                            : "bg-indigo-700 hover:bg-indigo-800"
+                          : isDarkMode 
+                            ? "bg-purple-700 hover:bg-purple-600" 
+                            : "bg-purple-600 hover:bg-purple-700"
+                      }`}
+                      onClick={() =>
+                        onView(
+                          `http-${i}`,
+                          `${gr.method} ▶ ${action}`,
+                          action === "Request"
+                            ? gr.lastRequestPayload
+                            : action === "Response"
+                            ? gr.lastResponsePayload
+                            : gr.lastHeaders
+                        )
+                      }
+                    >
+                      {action}
+                    </button>
+                  );
+                })}
               </td>
             </tr>
           ))}
-          {displayRows.length === 0 && (
-            <tr>
-              <td colSpan={7} className={`text-center py-4 transition-colors duration-200 ${
-                isDarkMode ? "text-gray-400" : "text-gray-500"
-              }`}>
-                No HTTP calls found.
-              </td>
-            </tr>
-          )}
         </tbody>
       </table>
     </div>

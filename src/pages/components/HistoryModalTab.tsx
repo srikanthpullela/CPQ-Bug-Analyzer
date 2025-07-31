@@ -47,10 +47,10 @@ export const HistoryModalTab: React.FC<Props> = ({
 }) => {
   const [previewData, setPreviewData] = useState<any | null>(null);
   const [previewTitle, setPreviewTitle] = useState<string>("");
-
   const [diffData, setDiffData] = useState<Change[] | null>(null);
   const [diffTitle, setDiffTitle] = useState<string>("");
   const [filterText, setFilterText] = useState("");
+  const [isSearching, setIsSearching] = useState(false);
 
   if (!open) return null;
 
@@ -65,6 +65,14 @@ export const HistoryModalTab: React.FC<Props> = ({
     const changes = diffLines(oldStr, newStr);
     setDiffData(changes);
     setDiffTitle(title);
+  };
+
+  const handleSearch = () => {
+    setIsSearching(true);
+    setTimeout(() => {
+      onSearch();
+      setIsSearching(false);
+    }, 500);
   };
 
   // Check if origin is a chrome extension URL
@@ -128,19 +136,33 @@ export const HistoryModalTab: React.FC<Props> = ({
                     : "border-gray-300 bg-white text-gray-900 placeholder-gray-500 focus:ring-blue-500"
                 }`}
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") onSearch();
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleSearch();
+                  }
                 }}
+                disabled={isSearching}
               />
               <button
-                onClick={onSearch}
-                className={`px-4 py-2 rounded border focus:ring transition-colors flex gap-2 items-center ${
+                onClick={handleSearch}
+                disabled={isSearching}
+                className={`px-4 py-2 rounded border focus:ring transition-colors flex gap-2 items-center min-w-[120px] disabled:opacity-50 disabled:cursor-not-allowed ${
                   isDarkMode
                     ? "border-gray-600 bg-blue-600 hover:bg-blue-700 text-white focus:ring-blue-500"
                     : "border-gray-300 bg-blue-600 hover:bg-blue-700 text-white focus:ring-blue-500"
                 }`}
               >
-                <Search size={16} />
-                Search
+                {isSearching ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    <span>Searching...</span>
+                  </>
+                ) : (
+                  <>
+                    <Search size={16} />
+                    Search
+                  </>
+                )}
               </button>
             </div>
 
@@ -149,17 +171,48 @@ export const HistoryModalTab: React.FC<Props> = ({
               placeholder="Filter within results..."
               value={filterText}
               onChange={(e) => setFilterText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  // Filter is reactive, no additional action needed
+                }
+              }}
               className={`w-full border px-3 py-2 rounded focus:ring transition-colors ${
                 isDarkMode
                   ? "border-gray-600 bg-gray-700 text-white placeholder-gray-400 focus:ring-blue-500"
                   : "border-gray-300 bg-white text-gray-900 placeholder-gray-500 focus:ring-blue-500"
               }`}
+              disabled={isSearching}
             />
           </div>
 
           {/* Scrollable List */}
           <div className="min-h-0 overflow-y-auto p-4 history-list">
-            {history.length > 0 ? (
+            {isSearching ? (
+              <div className="flex flex-col items-center justify-center py-8">
+                <div className={`w-8 h-8 border-4 rounded-full animate-spin mb-4 ${
+                  isDarkMode 
+                    ? "border-blue-800 border-t-blue-400" 
+                    : "border-blue-200 border-t-blue-600"
+                }`}></div>
+                <p className={`transition-colors ${
+                  isDarkMode ? "text-gray-300" : "text-gray-600"
+                }`}>
+                  Searching for field history...
+                </p>
+                <div className="flex space-x-1 mt-2">
+                  <div className={`w-2 h-2 rounded-full animate-pulse ${
+                    isDarkMode ? "bg-blue-400" : "bg-blue-500"
+                  }`} style={{ animationDelay: '0ms' }}></div>
+                  <div className={`w-2 h-2 rounded-full animate-pulse ${
+                    isDarkMode ? "bg-blue-400" : "bg-blue-500"
+                  }`} style={{ animationDelay: '150ms' }}></div>
+                  <div className={`w-2 h-2 rounded-full animate-pulse ${
+                    isDarkMode ? "bg-blue-400" : "bg-blue-500"
+                  }`} style={{ animationDelay: '300ms' }}></div>
+                </div>
+              </div>
+            ) : history.length > 0 ? (
               history.map((evt, i) => {
                 const filteredItems = evt.items.filter((it) =>
                   [it.id, it.objName, it.oldVal, it.newVal]
@@ -191,14 +244,14 @@ export const HistoryModalTab: React.FC<Props> = ({
                     </div>
                     <ul className="space-y-1 pl-4">
                       {(filterText ? filteredItems : evt.items).map((it) => {
-                        const changed = it.oldVal !== it.newVal;
+                        const changed = it.oldVal !== it.newVal && it.oldVal !== undefined;
                         return (
                           <li
                             key={`${it.id}-${it.objName}`}
                             className={
                               changed
                                 ? isDarkMode
-                                  ? "bg-green-900/30 p-1 rounded"
+                                  ? "bg-green-900 p-1 rounded"
                                   : "bg-green-100 p-1 rounded"
                                 : ""
                             }

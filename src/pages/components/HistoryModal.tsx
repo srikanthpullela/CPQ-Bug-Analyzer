@@ -43,10 +43,10 @@ export const HistoryModal: React.FC<Props> = ({
 }) => {
   const [previewData, setPreviewData] = useState<any | null>(null);
   const [previewTitle, setPreviewTitle] = useState<string>("");
-
   const [diffData, setDiffData] = useState<Change[] | null>(null);
   const [diffTitle, setDiffTitle] = useState<string>("");
   const [filterText, setFilterText] = useState("");
+  const [isSearching, setIsSearching] = useState(false);
 
   if (!open) return null;
 
@@ -63,14 +63,25 @@ export const HistoryModal: React.FC<Props> = ({
     setDiffTitle(title);
   };
 
+  const handleSearch = () => {
+    setIsSearching(true);
+    setTimeout(() => {
+      onSearch();
+      setIsSearching(false);
+    }, 500);
+  };
+
   return (
     <>
       {/* Backdrop + Main Modal */}
       <div
-        className="fixed inset-0 bg-black bg-opacity-60 backdrop-blur-lg flex items-center justify-center z-40"
-        style={{ backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)" }}
+        className="history-modal-container fixed inset-0 bg-black bg-opacity-60 backdrop-blur-lg flex items-center justify-center z-40"
+        style={{
+          backdropFilter: "blur(12px)",
+          WebkitBackdropFilter: "blur(12px)",
+        }}
       >
-        <div className="bg-white rounded-lg shadow-lg w-11/12 sm:w-3/4 lg:w-2/3 h-[85vh] flex flex-col min-h-0 z-50 transform transition-transform duration-300 ease-out">
+        <div className="history-modal bg-white rounded-lg shadow-lg w-11/12 sm:w-3/4 lg:w-2/3 h-[85vh] flex flex-col min-h-0 z-50 transform transition-transform duration-300 ease-out">
           {/* Header */}
           <div className="flex justify-between items-center p-4 border-b">
             <h3 className="text-xl font-semibold">History for “{fieldName}”</h3>
@@ -89,23 +100,26 @@ export const HistoryModal: React.FC<Props> = ({
                 onChange={(e) => onChangeField(e.target.value)}
                 className="flex-1 border px-3 py-2 rounded focus:ring"
                 onKeyDown={(e) => {
-                  if (e.key === "Enter") onSearch();
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleSearch();
+                  }
                 }}
+                disabled={isSearching}
               />
-              {/* <FieldSelector
-                allFields={allFields}
-                selectedFields={fieldName ? [fieldName] : []}
-                onChange={(fields) => {
-                  const selected = fields[0] || "";
-                  onChangeField(selected);
-                  onSearch();
-                }}
-              /> */}
               <button
-                onClick={onSearch}
-                className="px-4 py-2 rounded-lg border bg-green-700 text-white hover:bg-green-600 focus:ring"
+                onClick={handleSearch}
+                disabled={isSearching}
+                className="px-4 py-2 rounded-lg border bg-green-700 text-white hover:bg-green-600 focus:ring disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2 min-w-[100px]"
               >
-                Search
+                {isSearching ? (
+                  <>
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                    <span>Searching...</span>
+                  </>
+                ) : (
+                  "Search"
+                )}
               </button>
             </div>
 
@@ -114,13 +128,25 @@ export const HistoryModal: React.FC<Props> = ({
               placeholder="Filter within results..."
               value={filterText}
               onChange={(e) => setFilterText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  // Filter is reactive, no additional action needed
+                }
+              }}
               className="w-full border px-3 py-2 rounded focus:ring"
+              disabled={isSearching}
             />
           </div>
 
           {/* Scrollable List */}
           <div className="min-h-0 overflow-y-auto p-4 history-list">
-            {history.length > 0 ? (
+            {isSearching ? (
+              <div className="flex flex-col items-center justify-center py-8">
+                <div className="w-8 h-8 border-4 border-green-200 border-t-green-600 rounded-full animate-spin mb-4"></div>
+                <p className="text-gray-600">Searching for field history...</p>
+              </div>
+            ) : history.length > 0 ? (
               history.map((evt, i) => {
                 const filteredItems = evt.items.filter((it) =>
                   [it.id, it.objName, it.oldVal, it.newVal]
@@ -144,7 +170,7 @@ export const HistoryModal: React.FC<Props> = ({
                     </div>
                     <ul className="space-y-1 pl-4">
                       {(filterText ? filteredItems : evt.items).map((it) => {
-                        const changed = it.oldVal !== it.newVal;
+                        const changed = it.oldVal !== it.newVal && it.oldVal !== undefined;
                         return (
                           <li
                             key={`${it.id}-${it.objName}`}
@@ -224,7 +250,10 @@ export const HistoryModal: React.FC<Props> = ({
       {previewData && (
         <div
           className="fixed inset-0 bg-black bg-opacity-70 backdrop-blur-lg flex items-center justify-center z-60"
-          style={{ backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)" }}
+          style={{
+            backdropFilter: "blur(12px)",
+            WebkitBackdropFilter: "blur(12px)",
+          }}
           onClick={() => setPreviewData(null)}
         >
           <div
@@ -255,7 +284,10 @@ export const HistoryModal: React.FC<Props> = ({
       {diffData && (
         <div
           className="fixed inset-0 bg-black bg-opacity-70 backdrop-blur-lg flex items-center justify-center z-60"
-          style={{ backdropFilter: "blur(12px)", WebkitBackdropFilter: "blur(12px)" }}
+          style={{
+            backdropFilter: "blur(12px)",
+            WebkitBackdropFilter: "blur(12px)",
+          }}
           onClick={() => setDiffData(null)}
         >
           <div

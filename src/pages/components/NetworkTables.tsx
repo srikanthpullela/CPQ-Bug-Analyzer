@@ -1,6 +1,6 @@
 import React from "react";
 import { HttpTableTab } from "./HttpTableTab";
-import { WsTableTab } from "./WsTableTab1";
+import { WsTableTab } from "./WsTableTab";
 
 function getActivePatternNames(): string {
   try {
@@ -48,6 +48,51 @@ export const NetworkTables: React.FC<NetworkTablesProps> = ({
   requestHarReload,
   onView,
 }) => {
+  // Create a utility function for consistent filtering
+  const createFilterFunction = (searchTerm: string) => {
+    if (!searchTerm.trim()) return () => true;
+    
+    const term = searchTerm.toLowerCase();
+    
+    return (row: any) => {
+      const safeStringify = (obj: any) => {
+        try {
+          return JSON.stringify(obj || {});
+        } catch {
+          return String(obj || '');
+        }
+      };
+
+      // For HTTP rows
+      if ('requestPayload' in row) {
+        const combined = `${row.time} ${row.method} ${safeStringify(
+          row.requestPayload
+        )} ${safeStringify(row.responsePayload)} ${safeStringify(
+          row.requestHeaders || []
+        )} ${safeStringify(row.responseHeaders || [])} ${safeStringify(
+          row.headers || {}
+        )} ${row.url || ''} ${row.httpMethod || ''} ${row.endpoint || ''} ${row.displayName || ''}`;
+        
+        return combined.toLowerCase().includes(term);
+      }
+      
+      // For WS rows
+      if ('endpoint' in row) {
+        const combined = `${row.time || ''} ${row.endpoint || ''} ${row.action || ''} ${safeStringify(
+          row.payload
+        )} ${row.status || ''} ${row.direction || ''} ${row.id || ''}`;
+        
+        return combined.toLowerCase().includes(term);
+      }
+      
+      return false;
+    };
+  };
+
+  const filterFunction = createFilterFunction(searchTerm);
+  const filteredHttpRows = httpRows.filter(filterFunction);
+  const filteredWsRows = wsRows.filter(filterFunction);
+
   const totalRequests = httpRows.length + wsRows.length;
   const filteredHttpCount = httpRows.filter((row) =>
     JSON.stringify(row).toLowerCase().includes(searchTerm.toLowerCase())
@@ -117,74 +162,25 @@ export const NetworkTables: React.FC<NetworkTablesProps> = ({
     <div className="space-y-4">
       {/* HTTP Table */}
       <HttpTableTab
-        rows={httpRows}
-        filter={searchTerm}
+        rows={filteredHttpRows}
+        filter="" // Pass empty since we're pre-filtering
         selectedRowKey={selectedRowKey}
         onView={onView}
         isDarkMode={isDarkMode}
-        headerTitle={getActivePatternNames()}
+        headerTitle={`HTTP Requests (${filteredHttpRows.length}/${httpRows.length})`}
       />
 
-      {/* WebSocket Table with connection info - Only show if there are WS messages OR an active connection */}
-      {(wsRows.length > 0 || wsBaseUrl) && (
-        <div
-          className={`rounded-lg shadow-sm border transition-colors duration-200 ${
-            isDarkMode
-              ? "bg-gray-800 border-gray-700"
-              : "bg-white border-gray-200"
-          }`}
-        >
-          {/* WS Table Header with connection status */}
-          <div
-            className={`px-4 py-3 border-b transition-colors duration-200 ${
-              isDarkMode ? "border-gray-700" : "border-gray-200"
-            }`}
-          >
-            <div className="flex items-center justify-between">
-              <h3
-                className={`text-sm font-medium transition-colors duration-200 ${
-                  isDarkMode ? "text-gray-100" : "text-gray-900"
-                }`}
-              >
-                WebSocket Messages ({filteredWsCount})
-              </h3>
-
-              {/* WebSocket Connection Status */}
-              {wsBaseUrl && (
-                <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-                  <span
-                    className={`text-xs font-medium transition-colors duration-200 ${
-                      isDarkMode ? "text-green-300" : "text-green-800"
-                    }`}
-                  >
-                    Connected:
-                  </span>
-                  <code
-                    className={`text-xs px-2 py-1 rounded font-mono transition-colors duration-200 max-w-none ${
-                      isDarkMode
-                        ? "text-green-200 bg-green-800/30 border border-green-700"
-                        : "text-green-700 bg-green-100 border border-green-200"
-                    }`}
-                    title={wsBaseUrl}
-                  >
-                    {wsBaseUrl}
-                  </code>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* WS Table Content */}
-          <WsTableTab
-            rows={wsRows}
-            baseUrl={wsBaseUrl}
-            filter={searchTerm}
-            selectedRowKey={selectedRowKey}
-            onView={onView}
-            isDarkMode={isDarkMode}
-          />
-        </div>
+      {/* WebSocket Table */}
+      {wsRows.length > 0 && (
+        <WsTableTab
+          rows={filteredWsRows}
+          baseUrl={wsBaseUrl}
+          filter="" // Pass empty since we're pre-filtering
+          selectedRowKey={selectedRowKey}
+          onView={onView}
+          isDarkMode={isDarkMode}
+          headerTitle={`WebSocket Messages (${filteredWsRows.length}/${wsRows.length})`}
+        />
       )}
     </div>
   );

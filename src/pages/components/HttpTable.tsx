@@ -142,7 +142,22 @@ export const HttpTable: React.FC<Props> = ({
   });
 
   function getRowColorClass(gr: any): string {
-    // First check if we have the new hasMessages property from error detection
+    // First check HTTP status codes for errors
+    if (gr.status !== null && typeof gr.status === 'number') {
+      if (gr.status >= 500) {
+        // Server errors (5xx) - Red
+        return "bg-red-100 border-l-4 border-red-500";
+      } else if (gr.status >= 400) {
+        // Client errors (4xx) - Use inline styles for reliability
+        return "border-l-4 border-orange-500";
+      } else if (gr.status >= 300) {
+        // Redirects (3xx) - Yellow
+        return "bg-yellow-100 border-l-4 border-yellow-500";
+      }
+      // 2xx and 1xx are considered successful, continue to other checks
+    }
+
+    // Check if we have the new hasMessages property from error detection
     if (gr.hasMessages) {
       return "bg-red-100 border-l-4 border-red-500";
     }
@@ -166,6 +181,63 @@ export const HttpTable: React.FC<Props> = ({
 
     return "";
   }
+
+  // Add function to get status badge styling
+  const getStatusBadgeClass = (status: number | null): string => {
+    if (status === null) return 'bg-gray-100 text-gray-600';
+    
+    if (status >= 200 && status < 300) {
+      return 'bg-green-100 text-green-800 border-green-200';
+    } else if (status >= 300 && status < 400) {
+      return 'bg-yellow-100 text-yellow-800 border-yellow-200';
+    } else if (status >= 400 && status < 500) {
+      return 'border-orange-200';
+    } else if (status >= 500) {
+      return 'bg-red-100 text-red-800 border-red-200';
+    }
+    
+    return 'bg-gray-100 text-gray-600 border-gray-200';
+  };
+
+  // Add function to get inline styles for problematic colors
+  const getRowInlineStyle = (gr: any): React.CSSProperties => {
+    if (gr.status !== null && typeof gr.status === 'number') {
+      if (gr.status >= 400 && gr.status < 500) {
+        return {
+          backgroundColor: '#fed7aa', // orange-100 equivalent
+        };
+      }
+    }
+    return {};
+  };
+
+  const getStatusInlineStyle = (status: number | null): React.CSSProperties => {
+    if (status !== null && status >= 400 && status < 500) {
+      return {
+        backgroundColor: '#fed7aa', // orange-100
+        color: '#9a3412', // orange-800
+        borderColor: '#fdba74', // orange-200
+      };
+    }
+    return {};
+  };
+
+  // Add function to get status text for tooltips
+  const getStatusText = (status: number | null): string => {
+    if (status === null) return 'No status';
+    
+    if (status >= 200 && status < 300) {
+      return 'Success';
+    } else if (status >= 300 && status < 400) {
+      return 'Redirect';
+    } else if (status >= 400 && status < 500) {
+      return 'Client Error';
+    } else if (status >= 500) {
+      return 'Server Error';
+    }
+    
+    return 'Unknown';
+  };
 
   const getMethodColorClass = (method: string): string => {
     const httpMethod = method?.toUpperCase();
@@ -191,6 +263,8 @@ export const HttpTable: React.FC<Props> = ({
 
   return (
     <div className="border rounded overflow-x-auto">
+      {/* Add hidden safelist classes to ensure Tailwind includes them */}
+      <div className="hidden bg-orange-100 text-orange-800 border-orange-200 bg-amber-100 text-amber-800 border-amber-200"></div>
       <h3 className="bg-gray-100 p-2 font-semibold flex items-center justify-between">
         <span>Network Calls</span>
         {showAllCalls && (
@@ -235,6 +309,7 @@ export const HttpTable: React.FC<Props> = ({
               } ${
                 selectedRowId === gr.id ? "bg-blue-200 border-blue-200" : ""
               } transition-all duration-200 hover:bg-blue-100`}
+              style={getRowInlineStyle(gr)}
             >
               <td className="border px-2 text-center text-sm w-12">{i + 1}</td>
               <td className="border px-2 text-center text-sm w-20">{gr.time}</td>
@@ -270,45 +345,59 @@ export const HttpTable: React.FC<Props> = ({
                   </div>
                 </td>
               )}
-              <td className="border px-2 text-center text-sm w-16">{gr.status ?? "–"}</td>
+              <td className="border px-2 text-center text-sm w-16">
+                {gr.status !== null ? (
+                  <span
+                    className={`inline-block px-2 py-1 text-xs font-medium rounded border ${getStatusBadgeClass(gr.status)}`}
+                    style={getStatusInlineStyle(gr.status)}
+                    title={`${gr.status} - ${getStatusText(gr.status)}`}
+                  >
+                    {gr.status}
+                  </span>
+                ) : (
+                  <span className="text-gray-400">–</span>
+                )}
+              </td>
               <td className="border px-2 text-center text-sm w-20">
                 {gr.startTime && gr.endTime
                   ? `${((gr.endTime - gr.startTime) / 1000).toFixed(2)}s`
                   : "–"}
               </td>
-              <td className="border px-4 space-x-2 w-52">
-                {Array.from(gr.actions).map((action) => {
-                  // Only show Headers button if checkbox is checked
-                  if (action === "Headers" && !showHeadersButtons) {
-                    return null;
-                  }
-                  
-                  return (
-                    <button
-                      key={action}
-                      className={`px-2 py-1 ${
-                        action === "Request"
-                          ? "bg-indigo-500 hover:bg-indigo-600"
-                          : action === "Response"
-                          ? "bg-indigo-700 hover:bg-indigo-800"
-                          : "bg-purple-600 hover:bg-purple-700"
-                      } text-white rounded transition-colors duration-200 text-xs flex-shrink-0`}
-                      onClick={() => {
-                        onView(
-                          `${gr.method} ▶ ${action}`,
+              <td className="border px-4 w-52">
+                <div className="flex items-center gap-1 flex-nowrap min-w-0">
+                  {Array.from(gr.actions).map((action) => {
+                    // Only show Headers button if checkbox is checked
+                    if (action === "Headers" && !showHeadersButtons) {
+                      return null;
+                    }
+                    
+                    return (
+                      <button
+                        key={action}
+                        className={`px-2 py-1 text-xs font-medium text-white rounded transition-colors duration-200 whitespace-nowrap flex-shrink-0 ${
                           action === "Request"
-                            ? gr.lastRequestPayload
+                            ? "bg-indigo-500 hover:bg-indigo-600"
                             : action === "Response"
-                            ? gr.lastResponsePayload
-                            : gr.lastHeaders,
-                          gr.id
-                        );
-                      }}
-                    >
-                      {action}
-                    </button>
-                  );
-                })}
+                            ? "bg-indigo-700 hover:bg-indigo-800"
+                            : "bg-purple-600 hover:bg-purple-700"
+                        }`}
+                        onClick={() => {
+                          onView(
+                            `${gr.method} ▶ ${action}`,
+                            action === "Request"
+                              ? gr.lastRequestPayload
+                              : action === "Response"
+                              ? gr.lastResponsePayload
+                              : gr.lastHeaders,
+                            gr.id
+                          );
+                        }}
+                      >
+                        {action}
+                      </button>
+                    );
+                  })}
+                </div>
               </td>
             </tr>
           ))}

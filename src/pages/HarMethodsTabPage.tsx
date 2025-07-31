@@ -179,12 +179,54 @@ const HarMethodsTabPage: React.FC = () => {
   };
 
   const totalRequests = httpRows.length + wsRows.length;
-  const filteredHttpCount = httpRows.filter((row) =>
-    JSON.stringify(row).toLowerCase().includes(searchTerm.toLowerCase())
-  ).length;
-  const filteredWsCount = wsRows.filter((row) =>
-    JSON.stringify(row).toLowerCase().includes(searchTerm.toLowerCase())
-  ).length;
+  
+  // Create a utility function for consistent filtering
+  const createFilterFunction = (searchTerm: string) => {
+    if (!searchTerm.trim()) return () => true;
+    
+    const term = searchTerm.toLowerCase();
+    
+    return (row: any) => {
+      const safeStringify = (obj: any) => {
+        try {
+          return JSON.stringify(obj || {});
+        } catch {
+          return String(obj || '');
+        }
+      };
+
+      // For HTTP rows
+      if ('requestPayload' in row) {
+        const combined = `${row.time || ''} ${row.method || ''} ${safeStringify(
+          row.requestPayload
+        )} ${safeStringify(row.responsePayload)} ${safeStringify(
+          row.requestHeaders || []
+        )} ${safeStringify(row.responseHeaders || [])} ${safeStringify(
+          row.headers || {}
+        )} ${row.url || ''} ${row.httpMethod || ''} ${row.endpoint || ''} ${row.displayName || ''}`;
+        
+        return combined.toLowerCase().includes(term);
+      }
+      
+      // For WS rows
+      if ('endpoint' in row) {
+        const combined = `${row.time || ''} ${row.endpoint || ''} ${row.action || ''} ${safeStringify(
+          row.payload
+        )} ${row.status || ''} ${row.direction || ''} ${row.id || ''} ${safeStringify(
+          row.headers || {}
+        )} ${safeStringify(row.connectionHeaders || [])} ${safeStringify(
+          row.responseHeaders || [])}`;
+        
+        return combined.toLowerCase().includes(term);
+      }
+      
+      return false;
+    };
+  };
+
+  const filterFunction = createFilterFunction(searchTerm);
+  const filteredHttpCount = httpRows.filter(filterFunction).length;
+  const filteredWsCount = wsRows.filter(filterFunction).length;
 
   return (
     <div
