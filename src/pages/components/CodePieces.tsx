@@ -330,18 +330,30 @@ export const CodePieces: React.FC = () => {
             <span className="text-slate-300">|</span>
             <span className="text-slate-700 font-medium">Code Pieces</span>
           </div>
-          
+
           <div className="flex items-center gap-4 text-sm">
-            <Link to="/formatter" className="text-slate-600 hover:text-blue-600 transition-colors">
+            <Link
+              to="/formatter"
+              className="text-slate-600 hover:text-blue-600 transition-colors"
+            >
               Formatter
             </Link>
-            <Link to="/compare" className="text-slate-600 hover:text-blue-600 transition-colors">
+            <Link
+              to="/compare"
+              className="text-slate-600 hover:text-blue-600 transition-colors"
+            >
               Compare
             </Link>
-            <Link to="/har" className="text-slate-600 hover:text-blue-600 transition-colors">
+            <Link
+              to="/har"
+              className="text-slate-600 hover:text-blue-600 transition-colors"
+            >
               HAR
             </Link>
-            <Link to="/log" className="text-slate-600 hover:text-blue-600 transition-colors">
+            <Link
+              to="/log"
+              className="text-slate-600 hover:text-blue-600 transition-colors"
+            >
               Log
             </Link>
           </div>
@@ -465,7 +477,7 @@ export const CodePieces: React.FC = () => {
                   </span>
                 </div>
 
-                <div className="flex-1 flex items-center gap-6">
+                <div className="flex-1 flex justify-between gap-6">
                   <div className="flex items-center gap-2 text-sm">
                     <span className="text-slate-500">Used:</span>
                     <span className="font-semibold text-slate-700">
@@ -593,7 +605,9 @@ export const CodePieces: React.FC = () => {
                   style={{ maxHeight: "90vh" }}
                 >
                   <div className="p-6 border-b border-slate-200 flex items-center justify-between sticky top-0 bg-white z-10">
-                    <h2 className="text-xl font-semibold">Add New Code Piece</h2>
+                    <h2 className="text-xl font-semibold">
+                      Add New Code Piece
+                    </h2>
                     <button
                       onClick={() => setShowNewPiece(false)}
                       className="p-2 hover:bg-slate-100 rounded-lg transition-colors"
@@ -625,13 +639,18 @@ export const CodePieces: React.FC = () => {
                         <select
                           value={newPiece.language}
                           onChange={(e) =>
-                            setNewPiece({ ...newPiece, language: e.target.value })
+                            setNewPiece({
+                              ...newPiece,
+                              language: e.target.value,
+                            })
                           }
                           className="w-full px-3 py-2 border border-slate-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                         >
                           {languages.map((lang) => (
                             <option key={lang} value={lang}>
-                              {lang === "text" ? "Text" : lang.charAt(0).toUpperCase() + lang.slice(1)}
+                              {lang === "text"
+                                ? "Text"
+                                : lang.charAt(0).toUpperCase() + lang.slice(1)}
                             </option>
                           ))}
                         </select>
@@ -666,7 +685,9 @@ export const CodePieces: React.FC = () => {
                       </button>
                       <button
                         onClick={handleSaveNew}
-                        disabled={!newPiece.title.trim() || !newPiece.code.trim()}
+                        disabled={
+                          !newPiece.title.trim() || !newPiece.code.trim()
+                        }
                         className="px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors flex items-center gap-2"
                       >
                         <Save className="w-4 h-4" />
