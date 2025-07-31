@@ -142,54 +142,64 @@ export const WsTableTab: React.FC<Props> = ({
               <tr
                 key={i}
                 className={`transition-colors duration-200 cursor-pointer ${
-                  selectedRowKey === `ws-${i}` 
-                    ? (isDarkMode 
-                        ? "bg-blue-800 border-blue-600" 
-                        : "bg-blue-100 border-blue-300")
+                  selectedRowKey === `ws-${i}`
+                    ? isDarkMode
+                      ? "bg-blue-800 border-blue-600"
+                      : "bg-blue-100 border-blue-300"
                     : ""
                 } ${
-                  selectedRowKey === `ws-${i}` 
-                    ? "" 
+                  selectedRowKey === `ws-${i}`
+                    ? ""
                     : getWsRowColorClass(w) ||
-                      (i % 2 === 0 
-                        ? isDarkMode 
-                          ? "bg-gray-800 hover:bg-gray-600" 
+                      (i % 2 === 0
+                        ? isDarkMode
+                          ? "bg-gray-800 hover:bg-gray-600"
                           : "bg-white hover:bg-gray-50"
-                        : isDarkMode 
-                          ? "bg-gray-900 hover:bg-gray-600" 
-                          : "bg-gray-50 hover:bg-gray-100")
+                        : isDarkMode
+                        ? "bg-gray-900 hover:bg-gray-600"
+                        : "bg-gray-50 hover:bg-gray-100")
                 }`}
               >
-                <td className={`px-3 py-1 text-sm transition-colors duration-200 ${
-                  isDarkMode 
-                    ? "text-gray-200" 
-                    : "text-gray-900"
-                }`}>{i + 1}</td>
-                <td className={`px-3 py-1 text-sm transition-colors duration-200 ${
-                  isDarkMode 
-                    ? "text-gray-200" 
-                    : "text-gray-900"
-                }`}>{w.time}</td>
-                <td className={`px-3 py-1 text-sm break-all transition-colors duration-200 ${
-                  isDarkMode 
-                    ? "text-gray-200" 
-                    : "text-gray-900"
-                }`}>{w.endpoint}</td>
-                <td className={`px-3 py-1 text-sm transition-colors duration-200 ${
-                  isDarkMode 
-                    ? "text-green-400" 
-                    : "text-green-600"
-                } font-medium uppercase`}>{w.action || "—"}</td>
-                <td className={`px-3 py-1 text-sm transition-colors duration-200 ${
-                  isDarkMode 
-                    ? "text-gray-200" 
-                    : "text-gray-900"
-                }`}>{w.status ?? "–"}</td>
+                <td
+                  className={`px-3 py-1 text-sm transition-colors duration-200 ${
+                    isDarkMode ? "text-gray-200" : "text-gray-900"
+                  }`}
+                >
+                  {i + 1}
+                </td>
+                <td
+                  className={`px-3 py-1 text-sm transition-colors duration-200 ${
+                    isDarkMode ? "text-gray-200" : "text-gray-900"
+                  }`}
+                >
+                  {w.time}
+                </td>
+                <td
+                  className={`px-3 py-1 text-sm break-all transition-colors duration-200 ${
+                    isDarkMode ? "text-gray-200" : "text-gray-900"
+                  }`}
+                >
+                  {w.endpoint}
+                </td>
+                <td
+                  className={`px-3 py-1 text-sm transition-colors duration-200 ${
+                    isDarkMode ? "text-green-400" : "text-green-600"
+                  } font-medium uppercase`}
+                >
+                  {w.action || "—"}
+                </td>
+                <td
+                  className={`px-3 py-1 text-sm transition-colors duration-200 uppercase ${
+                    isDarkMode ? "text-gray-200" : "text-gray-900"
+                  }`}
+                >
+                  {w.status ?? "–"}
+                </td>
                 <td className={`px-3 py-1 transition-colors duration-200`}>
                   <button
                     className={`px-2 py-0.5 text-xs font-medium text-white rounded transition-colors duration-200 ${
-                      isDarkMode 
-                        ? "bg-indigo-600 hover:bg-indigo-500" 
+                      isDarkMode
+                        ? "bg-indigo-600 hover:bg-indigo-500"
                         : "bg-indigo-500 hover:bg-indigo-600"
                     }`}
                     onClick={() =>

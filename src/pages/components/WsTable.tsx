@@ -105,17 +105,77 @@ export const WsTable: React.FC<Props> = ({ rows, baseUrl, filter, onView, select
                 </td>
                 <td className="border px-4 text-sm">{w.action || "—"}</td>
                 <td className="border px-4 text-sm">
-                  {w.direction && (
-                    <span
-                      className={`inline-block px-2 py-1 text-xs rounded ${
-                        w.direction === "sent"
-                          ? "bg-blue-100 text-blue-800"
-                          : "bg-green-100 text-green-800"
-                      }`}
-                    >
-                      {w.direction}
-                    </span>
-                  )}
+                  {(() => {
+                    // Try multiple ways to determine direction
+                    let direction = w.direction;
+                    
+                    // If no direction is set, try to infer from other data
+                    if (!direction) {
+                      // Check payload structure for common WebSocket patterns
+                      if (w.payload) {
+                        // Check if it's a message being sent TO the server
+                        if (w.payload.action || w.payload.Action || 
+                            w.payload.method || w.payload.Method ||
+                            w.payload.command || w.payload.Command) {
+                          direction = 'sent';
+                        }
+                        // Check if it's a response FROM the server
+                        else if (w.payload.result || w.payload.Result ||
+                                 w.payload.response || w.payload.Response ||
+                                 w.payload.data || w.payload.Data ||
+                                 w.payload.PayLoad) {
+                          direction = 'received';
+                        }
+                        // Check for error responses (typically from server)
+                        else if (w.payload.error || w.payload.Error ||
+                                 w.payload.ErrorDetails || w.payload.WarningDetails) {
+                          direction = 'received';
+                        }
+                      }
+                      
+                      // Check action/endpoint patterns if payload doesn't help
+                      if (!direction) {
+                        const actionLower = (w.action || '').toLowerCase();
+                        const endpointLower = (w.endpoint || '').toLowerCase();
+                        
+                        // Common send patterns
+                        if (actionLower.includes('send') || actionLower.includes('request') ||
+                            actionLower.includes('call') || actionLower.includes('invoke') ||
+                            endpointLower.includes('send') || endpointLower.includes('out')) {
+                          direction = 'sent';
+                        }
+                        // Common receive patterns
+                        else if (actionLower.includes('receive') || actionLower.includes('response') ||
+                                 actionLower.includes('result') || actionLower.includes('callback') ||
+                                 endpointLower.includes('receive') || endpointLower.includes('in')) {
+                          direction = 'received';
+                        }
+                        // If we still don't know, use a heuristic based on typical patterns
+                        else if (w.status !== null && w.status !== undefined) {
+                          // If there's a status code, it's likely a response
+                          direction = 'received';
+                        }
+                        else {
+                          // Default to 'sent' for outgoing actions
+                          direction = 'sent';
+                        }
+                      }
+                    }
+                    
+                    return direction ? (
+                      <span
+                        className={`inline-block px-2 py-1 text-xs rounded ${
+                          direction === "sent"
+                            ? "bg-blue-100 text-blue-800"
+                            : "bg-green-100 text-green-800"
+                        }`}
+                      >
+                        {direction}
+                      </span>
+                    ) : (
+                      <span className="text-gray-400">–</span>
+                    );
+                  })()}
                 </td>
                 <td className="border px-4">{w.status ?? "–"}</td>
                 <td className="border px-4">

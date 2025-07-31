@@ -347,11 +347,11 @@ export const HttpTableTab: React.FC<Props> = ({
                 ? "text-gray-200" 
                 : "text-gray-700"
             }`}>Status</th>
-            <th className={`px-3 py-1 text-left text-sm font-medium transition-colors duration-200 ${
+            {/* <th className={`px-3 py-1 text-left text-sm font-medium transition-colors duration-200 ${
               isDarkMode 
                 ? "text-gray-200" 
                 : "text-gray-700"
-            }`}>Duration</th>
+            }`}>Duration</th> */}
             <th className={`px-3 py-1 text-left text-sm font-medium transition-colors duration-200 ${
               isDarkMode 
                 ? "text-gray-200" 
@@ -459,7 +459,7 @@ export const HttpTableTab: React.FC<Props> = ({
                   <span className={isDarkMode ? "text-gray-400" : "text-gray-400"}>–</span>
                 )}
               </td>
-              <td className={`px-3 py-1 text-sm transition-colors duration-200 ${
+              {/* <td className={`px-3 py-1 text-sm transition-colors duration-200 ${
                 isDarkMode 
                   ? "text-gray-200" 
                   : "text-gray-700"
@@ -467,7 +467,7 @@ export const HttpTableTab: React.FC<Props> = ({
                 {gr.startTime && gr.endTime
                   ? `${((gr.endTime - gr.startTime) / 1000).toFixed(2)}s`
                   : "–"}
-              </td>
+              </td> */}
               <td className={`px-3 py-1 space-x-1 flex transition-colors duration-200`}>
                 {Array.from(gr.actions).map((action) => {
                   // Only show Headers button if checkbox is checked

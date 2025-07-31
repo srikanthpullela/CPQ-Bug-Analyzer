@@ -312,7 +312,9 @@ export const HttpTable: React.FC<Props> = ({
               style={getRowInlineStyle(gr)}
             >
               <td className="border px-2 text-center text-sm w-12">{i + 1}</td>
-              <td className="border px-2 text-center text-sm w-20">{gr.time}</td>
+              <td className="border px-2 text-center text-sm w-20">
+                {gr.time}
+              </td>
               <td className="border px-2 text-center w-24">
                 {gr.httpMethod && (
                   <span
@@ -325,18 +327,25 @@ export const HttpTable: React.FC<Props> = ({
                 )}
               </td>
               <td className="border px-4 py-2 text-sm method-td transition-colors duration-200 min-w-0">
-                <div 
-                  className="break-words" 
+                <div
+                  className="break-words"
                   title={rows.find((r) => r.id === gr.id)?.url || gr.method}
-                  style={{ wordBreak: 'break-word', overflowWrap: 'break-word' }}
+                  style={{
+                    wordBreak: "break-word",
+                    overflowWrap: "break-word",
+                  }}
                 >
                   {gr.method}
                 </div>
               </td>
               {showAllCalls && (
-                <td className="border px-4 w-48">
+                <td className="border px-4 py-2 text-sm method-td transition-colors duration-200 min-w-0">
                   <div
-                    className="truncate text-xs text-gray-600"
+                    className="break-words"
+                    style={{
+                      wordBreak: "break-word",
+                      overflowWrap: "break-word",
+                    }}
                     title={rows.find((r) => r.id === gr.id)?.url}
                   >
                     {rows
@@ -348,7 +357,9 @@ export const HttpTable: React.FC<Props> = ({
               <td className="border px-2 text-center text-sm w-16">
                 {gr.status !== null ? (
                   <span
-                    className={`inline-block px-2 py-1 text-xs font-medium rounded border ${getStatusBadgeClass(gr.status)}`}
+                    className={`inline-block px-2 py-1 text-xs font-medium rounded border ${getStatusBadgeClass(
+                      gr.status
+                    )}`}
                     style={getStatusInlineStyle(gr.status)}
                     title={`${gr.status} - ${getStatusText(gr.status)}`}
                   >
@@ -370,7 +381,7 @@ export const HttpTable: React.FC<Props> = ({
                     if (action === "Headers" && !showHeadersButtons) {
                       return null;
                     }
-                    
+
                     return (
                       <button
                         key={action}

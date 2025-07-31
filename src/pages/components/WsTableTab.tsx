@@ -280,7 +280,7 @@ export const WsTableTab: React.FC<Props> = ({
                 </td>
 
                 <td
-                  className={`px-3 py-1 text-sm transition-colors duration-200 ${
+                  className={`px-3 py-1 text-sm transition-colors duration-200 uppercase ${
                     isDarkMode ? "text-gray-200" : "text-gray-700"
                   }`}
                 >
@@ -305,7 +305,7 @@ export const WsTableTab: React.FC<Props> = ({
                 </td>
 
                 <td
-                  className={`px-3 py-1 text-sm transition-colors duration-200 ${
+                  className={`px-3 py-1 text-sm transition-colors duration-200 uppercase ${
                     isDarkMode ? "text-gray-200" : "text-gray-700"
                   }`}
                 >
