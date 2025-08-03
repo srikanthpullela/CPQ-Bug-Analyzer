@@ -113,8 +113,31 @@ export const DetailPanel: React.FC<Props> = ({
   const searchInputRef = useRef<HTMLInputElement>(null);
   const rawJsonContainerRef = useRef<HTMLDivElement>(null);
   const [showEditRequest, setShowEditRequest] = useState(false);
-  // For ApexRemote calls, construct the URL if needed
-  const finalUrl = data?.url || (origin ? `${origin}/apexremote` : null);
+  
+  // Determine the appropriate URL for re-triggering requests
+  const finalUrl = useMemo(() => {
+    // Check for URL in various possible locations
+    if (data?.url || data?._url) {
+      return data.url || data._url;
+    }
+    
+    // For ApexRemote calls specifically, construct the apexremote URL
+    if (data?.patternType === 'apex' || 
+        data?.urlPattern === 'ApexRemote' ||
+        (data?.method && !data?.httpMethod && !data?.endpoint)) {
+      return origin ? `${origin}/apexremote` : null;
+    }
+    
+    // For HTTP calls, try to construct from available data
+    if (data?.patternType === 'http' && data?.endpoint && origin) {
+      // If we have an endpoint, construct the full URL
+      const endpoint = data.endpoint.startsWith('/') ? data.endpoint : `/${data.endpoint}`;
+      return `${origin}${endpoint}`;
+    }
+    
+    // For other cases, we don't have enough info to construct a URL
+    return null;
+  }, [data, origin]);
 
   // const [rawPayloadText, setRawPayloadText] = useState<string>("");
   // const [requestPayloadOverride, setRequestPayloadOverride] = useState<any>({});
@@ -122,16 +145,44 @@ export const DetailPanel: React.FC<Props> = ({
   const isRequestView = title?.toLowerCase().includes("request");
   
   // Check if we have enough data to re-trigger a request
-  const canRetriggerRequest = isRequestView && data && (
-    // For HTTP requests, we need at least a URL or method/endpoint info
-    data.url || 
-    data.method || 
-    data.displayName ||
-    // For ApexRemote calls, we need the constructed finalUrl
+  const canRetriggerRequest = data && (
+    // Always show for request views that have URL information
+    (isRequestView && (
+      data.url || 
+      data._url || 
+      data.method || 
+      data._method ||
+      data.displayName ||
+      finalUrl ||
+      data.requestPayload || 
+      data.payload
+    )) ||
+    // Also show for any data that has a finalUrl (can be resent)
     finalUrl ||
-    // For any request with sufficient payload data
-    (data.requestPayload || data.payload)
+    // Show for any data with method information
+    data.method ||
+    data._method ||
+    data.httpMethod
   );
+
+  // Temporary debug log to check data flow
+  if (open && data) {
+    console.log('DetailPanel - Resend Button Debug:', {
+      title,
+      isRequestView,
+      canRetriggerRequest,
+      hasOnEditRequest: !!onEditRequest,
+      finalUrl,
+      'data.url': data.url,
+      'data.method': data.method,
+      'data.httpMethod': data.httpMethod,
+      'data.displayName': data.displayName,
+      'data.patternType': data.patternType,
+      'data.urlPattern': data.urlPattern,
+      'data.endpoint': data.endpoint,
+      'data keys': Object.keys(data)
+    });
+  }
 
   // Try to JSON.parse any string that *looks* like JSON
   function tryParseJSON(str: string): any {
@@ -355,6 +406,83 @@ export const DetailPanel: React.FC<Props> = ({
     return data;
   };
 
+  // Function to extract clean payload data for DetailPanel display
+  const extractDisplayData = (data: any) => {
+    if (!data) return {};
+
+    // For Request views, show only the actual payload/request data
+    if (isRequestView) {
+      // Try to get the actual request payload
+      if (data.requestPayload) {
+        // If requestPayload exists, show it
+        return data.requestPayload;
+      } else if (data.payload) {
+        // If payload exists, show it but filter out metadata
+        const cleanPayload = { ...data.payload };
+        
+        // Remove technical metadata fields that aren't useful for users
+        delete cleanPayload._method;
+        delete cleanPayload._url;
+        delete cleanPayload._headers;
+        delete cleanPayload._rawPostData;
+        delete cleanPayload._queryString;
+        delete cleanPayload._originalPayload;
+        delete cleanPayload._noPayload;
+        delete cleanPayload._resendMethod;
+        delete cleanPayload._resendUrl;
+        delete cleanPayload.url;
+        delete cleanPayload.requestHeaders;
+        delete cleanPayload.responseHeaders;
+        delete cleanPayload.headers;
+        delete cleanPayload._debug;
+        
+        // If after cleaning we have meaningful data, return it
+        const remainingKeys = Object.keys(cleanPayload);
+        if (remainingKeys.length > 0) {
+          // Check if all remaining values are meaningful (not empty or metadata)
+          const meaningfulData = remainingKeys.some(key => {
+            const value = cleanPayload[key];
+            return value !== null && value !== undefined && value !== '' && 
+                   !key.startsWith('_') && typeof value !== 'undefined';
+          });
+          
+          if (meaningfulData) {
+            return cleanPayload;
+          }
+        }
+        
+        // If no meaningful payload data, return empty object
+        return {};
+      } else {
+        // For basic request data, try to extract meaningful content
+        const extractedData: any = {};
+        
+        // Look for common request fields
+        if (data.method && !data.method.startsWith('_')) {
+          extractedData.method = data.method;
+        }
+        
+        // Copy any data that doesn't look like metadata
+        Object.keys(data).forEach(key => {
+          if (!key.startsWith('_') && 
+              !['url', 'timestamp', 'endTime', 'baseUrl', 'hasMessages', 
+                'requestHeaders', 'responseHeaders', 'headers', 'patternType', 
+                'urlPattern', 'httpMethod', 'displayName', 'endpoint'].includes(key)) {
+            const value = data[key];
+            if (value !== null && value !== undefined && value !== '') {
+              extractedData[key] = value;
+            }
+          }
+        });
+        
+        return Object.keys(extractedData).length > 0 ? extractedData : {};
+      }
+    }
+    
+    // For Response views or other views, show all data but formatted nicely
+    return data;
+  };
+
   // Helper function to format header arrays
   const formatHeadersArray = (headers: any[]) => {
     if (!Array.isArray(headers)) return {};
@@ -374,11 +502,21 @@ export const DetailPanel: React.FC<Props> = ({
     return formatted;
   };
 
-  // Enhanced parsed data with header formatting
+  // Enhanced parsed data - use clean payload for Request views, full data for others
   const parsedData = useMemo(() => {
-    const deepParsed = deepParse(data);
-    return formatHeaderData(deepParsed);
-  }, [data]);
+    // First extract the appropriate data based on view type
+    const displayData = extractDisplayData(data);
+    
+    // Then do the deep parsing and header formatting
+    const deepParsed = deepParse(displayData);
+    
+    // Only format header data for non-request views or when we have header-specific data
+    if (!isRequestView || (displayData && (displayData.requestHeaders || displayData.responseHeaders))) {
+      return formatHeaderData(deepParsed);
+    }
+    
+    return deepParsed;
+  }, [data, isRequestView]);
 
   // Get formatted JSON string
   const formattedJSON = useMemo(() => {
@@ -475,7 +613,13 @@ export const DetailPanel: React.FC<Props> = ({
               <button
                 onClick={() => {
                   if (onEditRequest) {
-                    onEditRequest(data, data.method || data.displayName || 'HTTP Request');
+                    // Create enhanced data with the correct URL and method for resending
+                    const enhancedData = {
+                      ...data,
+                      url: finalUrl || data.url || data._url, // Ensure we use the correct URL
+                      _resendUrl: finalUrl || data.url || data._url, // Add explicit resend URL for reference
+                    };
+                    onEditRequest(enhancedData, data.method || data._method || data.displayName || 'HTTP Request');
                   }
                 }}
                 className={`inline-flex items-center px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors ${
@@ -753,68 +897,85 @@ export const DetailPanel: React.FC<Props> = ({
         }`}>
           {viewTree ? (
             <div className="flex-1 min-h-0 p-4">
-              <div className="h-full overflow-auto" style={{ maxHeight: "100%" }}>
-                <ReactJson
-                  src={
-                    typeof parsedData === "object"
-                      ? parsedData
-                      : { value: parsedData }
-                  }
-                  name={false}
-                  collapsed={parsedData?._headerInfo ? 1 : 2} // Less collapsed for headers
-                  enableClipboard={false}
-                  displayDataTypes={false}
-                  displayObjectSize={false}
-                  indentWidth={2}
-                  style={{
-                    fontSize: "0.75rem",
-                    fontFamily: "monospace, ui-monospace, SFMono-Regular, 'SF Mono', Monaco, Consolas, 'Liberation Mono', 'Menlo'",
-                    backgroundColor: "transparent",
-                    padding: "0",
-                    maxHeight: "100%",
-                    overflow: "visible",
-                  }}
-                  theme={
-                    isDarkMode
-                      ? {
-                          base00: "transparent", // editor background
-                          base01: "#374151", // lighter background
-                          base02: "#4b5563", // selection background
-                          base03: "#6b7280", // comments
-                          base04: "#9ca3af", // dark foreground
-                          base05: "#f3f4f6", // default foreground
-                          base06: "#f9fafb", // light foreground
-                          base07: "#ffffff", // lightest foreground
-                          base08: "#f87171", // red
-                          base09: "#fb923c", // orange
-                          base0A: "#fbbf24", // yellow
-                          base0B: "#34d399", // green
-                          base0C: "#22d3ee", // cyan
-                          base0D: "#60a5fa", // blue
-                          base0E: "#a78bfa", // purple
-                          base0F: "#9ca3af", // brown
-                        }
-                      : {
-                          base00: "transparent",
-                          base01: "#f8f9fa",
-                          base02: "#e9ecef",
-                          base03: "#6c757d",
-                          base04: "#495057",
-                          base05: "#212529",
-                          base06: "#212529",
-                          base07: "#000000",
-                          base08: "#dc3545",
-                          base09: "#fd7e14",
-                          base0A: "#ffc107",
-                          base0B: "#28a745",
-                          base0C: "#17a2b8",
-                          base0D: "#007bff",
-                          base0E: "#6f42c1",
-                          base0F: "#6c757d",
-                        }
-                  }
-                />
-              </div>
+              {/* Show empty state message for request views with no payload */}
+              {isRequestView && Object.keys(parsedData).length === 0 ? (
+                <div className={`h-full flex items-center justify-center text-center transition-colors duration-200 ${
+                  isDarkMode ? "text-gray-400" : "text-gray-500"
+                }`}>
+                  <div>
+                    <p className="text-lg mb-2">No Request Payload</p>
+                    <p className="text-sm">
+                      This request doesn't contain any payload data.<br/>
+                      {canRetriggerRequest && onEditRequest && (
+                        <>Use the <strong>Resend</strong> button to view technical details and re-trigger the request.</>
+                      )}
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                <div className="h-full overflow-auto" style={{ maxHeight: "100%" }}>
+                  <ReactJson
+                    src={
+                      typeof parsedData === "object" && Object.keys(parsedData).length > 0
+                        ? parsedData
+                        : { value: parsedData }
+                    }
+                    name={false}
+                    collapsed={parsedData?._headerInfo ? 1 : 2} // Less collapsed for headers
+                    enableClipboard={false}
+                    displayDataTypes={false}
+                    displayObjectSize={false}
+                    indentWidth={2}
+                    style={{
+                      fontSize: "0.75rem",
+                      fontFamily: "monospace, ui-monospace, SFMono-Regular, 'SF Mono', Monaco, Consolas, 'Liberation Mono', 'Menlo'",
+                      backgroundColor: "transparent",
+                      padding: "0",
+                      maxHeight: "100%",
+                      overflow: "visible",
+                    }}
+                    theme={
+                      isDarkMode
+                        ? {
+                            base00: "transparent", // editor background
+                            base01: "#374151", // lighter background
+                            base02: "#4b5563", // selection background
+                            base03: "#6b7280", // comments
+                            base04: "#9ca3af", // dark foreground
+                            base05: "#f3f4f6", // default foreground
+                            base06: "#f9fafb", // light foreground
+                            base07: "#ffffff", // lightest foreground
+                            base08: "#f87171", // red
+                            base09: "#fb923c", // orange
+                            base0A: "#fbbf24", // yellow
+                            base0B: "#34d399", // green
+                            base0C: "#22d3ee", // cyan
+                            base0D: "#60a5fa", // blue
+                            base0E: "#a78bfa", // purple
+                            base0F: "#9ca3af", // brown
+                          }
+                        : {
+                            base00: "transparent",
+                            base01: "#f8f9fa",
+                            base02: "#e9ecef",
+                            base03: "#6c757d",
+                            base04: "#495057",
+                            base05: "#212529",
+                            base06: "#212529",
+                            base07: "#000000",
+                            base08: "#dc3545",
+                            base09: "#fd7e14",
+                            base0A: "#ffc107",
+                            base0B: "#28a745",
+                            base0C: "#17a2b8",
+                            base0D: "#007bff",
+                            base0E: "#6f42c1",
+                            base0F: "#6c757d",
+                          }
+                    }
+                  />
+                </div>
+              )}
             </div>
           ) : (
             <div
@@ -823,7 +984,24 @@ export const DetailPanel: React.FC<Props> = ({
                 isDarkMode ? "text-gray-200" : "text-gray-800"
               }`}
             >
-              {renderHighlightedJSON(formattedJSON)}
+              {/* Show empty state message for request views with no payload */}
+              {isRequestView && Object.keys(parsedData).length === 0 ? (
+                <div className={`h-full flex items-center justify-center text-center transition-colors duration-200 ${
+                  isDarkMode ? "text-gray-400" : "text-gray-500"
+                }`}>
+                  <div>
+                    <p className="text-lg mb-2">No Request Payload</p>
+                    <p className="text-sm">
+                      This request doesn't contain any payload data.<br/>
+                      {canRetriggerRequest && onEditRequest && (
+                        <>Use the <strong>Resend</strong> button to view technical details and re-trigger the request.</>
+                      )}
+                    </p>
+                  </div>
+                </div>
+              ) : (
+                renderHighlightedJSON(formattedJSON)
+              )}
             </div>
           )}
         </div>

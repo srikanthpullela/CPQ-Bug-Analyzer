@@ -510,7 +510,7 @@ export default function FieldSelector({
 
   // Modal content component
   const modalContent = (
-    <div className="fixed inset-0 z-[9999] flex items-start justify-center pt-8 px-4 sm:px-6 lg:px-8">
+    <div className="fixed inset-0 z-10 flex items-start justify-center pt-8 px-4 sm:px-6 lg:px-8">
       {/* Backdrop */}
       <div
         className="fixed inset-0 bg-black bg-opacity-50 transition-opacity duration-300"

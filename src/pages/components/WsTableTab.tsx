@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState } from "react";
 
 export interface WsRow {
   time: string;
@@ -38,6 +38,8 @@ export const WsTableTab: React.FC<Props> = ({
   isDarkMode = false,
   headerTitle = "WebSocket Messages",
 }) => {
+  // Add state for minimizing/expanding the table
+  const [isMinimized, setIsMinimized] = useState(false);
   // Enhanced filtering to include header data and all relevant fields
   const filtered = rows.filter((r) => {
     const safeStringify = (obj: any) => {
@@ -135,10 +137,32 @@ export const WsTableTab: React.FC<Props> = ({
             : "bg-gray-100 text-gray-800 border-b border-gray-200"
         }`}
       >
-        {headerTitle}
+        <div className="flex items-center justify-between">
+          <span>{headerTitle}</span>
+          <button
+            onClick={() => setIsMinimized(!isMinimized)}
+            className={`ml-2 p-1 rounded transition-colors duration-200 ${
+              isDarkMode
+                ? "hover:bg-gray-600 text-gray-300 hover:text-gray-100"
+                : "hover:bg-gray-200 text-gray-600 hover:text-gray-800"
+            }`}
+            title={isMinimized ? "+" : "-"}
+          >
+            {isMinimized ? (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 12H6" />
+              </svg>
+            )}
+          </button>
+        </div>
       </h3>
 
-      {/* Connection URL display */}
+      {/* Connection URL display - only show when not minimized */}
+      {!isMinimized && (
       <div className="flex items-center gap-2">
         <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
         <span
@@ -159,7 +183,10 @@ export const WsTableTab: React.FC<Props> = ({
           {baseUrl}
         </code>
       </div>
+      )}
 
+      {/* Conditionally render the table based on isMinimized state */}
+      {!isMinimized && (
       <table className="min-w-full table-auto">
         <thead
           className={`transition-colors duration-200 ${
@@ -418,6 +445,7 @@ export const WsTableTab: React.FC<Props> = ({
           )}
         </tbody>
       </table>
+      )}
     </div>
   );
 };

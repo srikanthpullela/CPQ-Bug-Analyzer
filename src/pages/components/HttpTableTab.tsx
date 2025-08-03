@@ -45,6 +45,8 @@ export const HttpTableTab: React.FC<Props> = ({
 }) => {
   // Add state for showing headers buttons
   const [showHeadersButtons, setShowHeadersButtons] = useState(false);
+  // Add state for minimizing/expanding the table
+  const [isMinimized, setIsMinimized] = useState(false);
 
   const filtered = rows.filter((r) => {
     const safeStringify = (obj: any) => {
@@ -133,15 +135,42 @@ export const HttpTableTab: React.FC<Props> = ({
 
     // Always add Request action - even if no payload, show method info
     groups[keyToUse].actions.add("Request");
-    groups[keyToUse].lastRequestPayload = r.requestPayload || {
-      _method: r.httpMethod || r.method,
-      _url: r.url,
-      _noPayload: true,
-    };
+    
+    // Check if requestPayload is empty object or null/undefined
+    const hasValidRequestPayload = r.requestPayload && 
+      typeof r.requestPayload === 'object' && 
+      Object.keys(r.requestPayload).length > 0;
+    
+    // Always ensure URL information is available for resending
+    if (hasValidRequestPayload) {
+      groups[keyToUse].lastRequestPayload = {
+        ...r.requestPayload,
+        // Add URL metadata for resending - use underscore prefix to avoid conflicts
+        _method: r.httpMethod || r.method,
+        _url: r.url,
+        _originalPayload: true,
+        // Add request headers for authentication
+        _headers: r.requestHeaders || r.headers?.request || [],
+      };
+    } else {
+      groups[keyToUse].lastRequestPayload = {
+        _method: r.httpMethod || r.method,
+        _url: r.url,
+        _noPayload: true,
+        // Add request headers for authentication
+        _headers: r.requestHeaders || r.headers?.request || [],
+      };
+    }
 
     // Always add Response action - even if no payload, show status info
     groups[keyToUse].actions.add("Response");
-    groups[keyToUse].lastResponsePayload = r.responsePayload || {
+    
+    // Check if responsePayload is empty object or null/undefined
+    const hasValidResponsePayload = r.responsePayload && 
+      typeof r.responsePayload === 'object' && 
+      Object.keys(r.responsePayload).length > 0;
+    
+    groups[keyToUse].lastResponsePayload = hasValidResponsePayload ? r.responsePayload : {
       _status: r.status,
       _noPayload: true,
       _message: r.status >= 400 ? 'Error Response' : 'Success Response'
@@ -315,8 +344,32 @@ export const HttpTableTab: React.FC<Props> = ({
           ? "bg-gray-700 text-gray-100 border-b border-gray-600" 
           : "bg-gray-100 text-gray-800 border-b border-gray-200"
       }`}>
-        {headerTitle}
+        <div className="flex items-center justify-between">
+          <span>{headerTitle}</span>
+          <button
+            onClick={() => setIsMinimized(!isMinimized)}
+            className={`ml-2 p-1 rounded transition-colors duration-200 ${
+              isDarkMode
+                ? "hover:bg-gray-600 text-gray-300 hover:text-gray-100"
+                : "hover:bg-gray-200 text-gray-600 hover:text-gray-800"
+            }`}
+            title={isMinimized ? "+" : "-"}
+          >
+            {isMinimized ? (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+              </svg>
+            ) : (
+              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 12H6" />
+              </svg>
+            )}
+          </button>
+        </div>
       </h3>
+      
+      {/* Conditionally render the table based on isMinimized state */}
+      {!isMinimized && (
       <table className="min-w-full table-auto">
         <thead className={`transition-colors duration-200 ${
           isDarkMode ? "bg-gray-700" : "bg-gray-50"
@@ -491,17 +544,19 @@ export const HttpTableTab: React.FC<Props> = ({
                             ? "bg-purple-700 hover:bg-purple-600" 
                             : "bg-purple-600 hover:bg-purple-700"
                       }`}
-                      onClick={() =>
+                      onClick={() => {
+                        const dataToPass = action === "Request"
+                          ? gr.lastRequestPayload
+                          : action === "Response"
+                          ? gr.lastResponsePayload
+                          : gr.lastHeaders;
+                        
                         onView(
                           `http-${i}`,
                           `${gr.method} ▶ ${action}`,
-                          action === "Request"
-                            ? gr.lastRequestPayload
-                            : action === "Response"
-                            ? gr.lastResponsePayload
-                            : gr.lastHeaders
-                        )
-                      }
+                          dataToPass
+                        );
+                      }}
                     >
                       {action}
                     </button>
@@ -509,9 +564,10 @@ export const HttpTableTab: React.FC<Props> = ({
                 })}
               </td>
             </tr>
-          ))}
+            ))}
         </tbody>
       </table>
+      )}
     </div>
   );
 };

@@ -6,6 +6,8 @@ let debuggerAttached = false;
 let wsFirstTimestamp: number | null = null;
 let wsFirstWallClock: number | null = null;
 let reloadTimeout: ReturnType<typeof setTimeout> | null = null;
+// Declare chrome API for TypeScript
+declare const chrome: any;
 
 // URL Pattern Configuration System
 interface UrlPattern {
@@ -234,6 +236,144 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
     currentTabId = tabId;
     const debuggee = { tabId };
 
+    // Add chrome.runtime.onMessage listener for HAR_RETRIGGER from React panel
+    // Make it tab-specific by checking currentTabId
+    const messageListener = (message: any, sender: any, sendResponse: any) => {
+      // Only process messages for the current tab
+      if (message.source === "HAR_EXTRACTOR" && message.type === "HAR_RETRIGGER") {
+        // Check if this message is for the current tab by comparing message tab ID
+        if (message.tabId && message.tabId !== currentTabId) {
+          console.log("🔄 Ignoring HAR_RETRIGGER for different tab:", message.tabId, "vs current:", currentTabId);
+          return;
+        }
+        
+        console.log("🔄 DevTools received HAR_RETRIGGER via chrome.runtime for tab:", currentTabId, message);
+        
+        const method = message.method || 'POST';
+        const url = message.url;
+        const payload = message.payload;
+        
+        console.log("🔄 Method:", method, "URL:", url);
+        console.log("🔄 Payload:", payload);
+        
+        // Extract headers from payload
+        const requestHeaders = payload._headers || [];
+        console.log("🔄 Request headers:", requestHeaders);
+        
+        // Build headers object for fetch
+        let headersObj: any = {
+          "Content-Type": "application/json",
+          "Accept": "application/json"
+        };
+        
+        // Add original request headers (especially Authorization)
+        if (Array.isArray(requestHeaders)) {
+          requestHeaders.forEach((header: any) => {
+            if (header && typeof header === 'object' && header.name && header.value !== undefined) {
+              // Skip certain headers that fetch will set automatically or cause issues
+              const skipHeaders = [
+                'content-length', 'host', 'connection', 'user-agent',
+                // Skip HTTP/2 pseudo-headers that start with ':'
+                ':authority', ':method', ':path', ':scheme', ':status',
+                // Skip other problematic headers
+                'transfer-encoding', 'upgrade', 'via', 'x-forwarded-for',
+                'x-forwarded-proto', 'x-real-ip'
+              ];
+              
+              const headerName = header.name.toLowerCase();
+              
+              // Skip if header name starts with ':' (HTTP/2 pseudo-headers) or is in skip list
+              if (!headerName.startsWith(':') && !skipHeaders.includes(headerName)) {
+                headersObj[header.name] = header.value;
+              }
+            }
+          });
+        }
+        
+        console.log("🔄 Final headers object:", headersObj);
+        
+        // Create clean payload
+        let cleanPayload: any = null;
+        if (method !== 'GET' && method !== 'HEAD' && payload) {
+          // Remove metadata fields for cleaner payload
+          cleanPayload = { ...payload };
+          delete cleanPayload._method;
+          delete cleanPayload._url;
+          delete cleanPayload._originalPayload;
+          delete cleanPayload._noPayload;
+          delete cleanPayload._resendMethod;
+          delete cleanPayload._resendUrl;
+          delete cleanPayload._headers;
+          delete cleanPayload.url;
+          
+          console.log("🔄 Clean payload:", cleanPayload);
+        }
+        
+        // Build the fetch call using chrome.devtools.inspectedWindow.eval
+        const evalScript = `
+          (function() {
+            console.log("[HAR_RETRIGGER] Starting fetch to: ${url}");
+            console.log("[HAR_RETRIGGER] Script is executing in page context for tab: ${currentTabId}");
+            
+            const fetchOptions = {
+              method: "${method}",
+              headers: ${JSON.stringify(headersObj)},
+              credentials: "include"${cleanPayload ? `,
+              body: ${JSON.stringify(JSON.stringify(cleanPayload))}` : ''}
+            };
+            
+            console.log("[HAR_RETRIGGER] Fetch options:", fetchOptions);
+            
+            return fetch("${url}", fetchOptions)
+              .then(response => {
+                console.log("[HAR_RETRIGGER] Response status:", response.status);
+                window.postMessage({ 
+                  source: "HAR_EXTRACTOR", 
+                  type: "HAR_RETRIGGER_RESPONSE", 
+                  data: "Success: " + response.status 
+                }, "*");
+                return response.text();
+              })
+              .then(responseText => {
+                console.log("[HAR_RETRIGGER] Response text length:", responseText.length);
+                window.postMessage({ 
+                  source: "HAR_EXTRACTOR", 
+                  type: "HAR_RETRIGGER_RESPONSE", 
+                  data: responseText 
+                }, "*");
+                return "Fetch completed successfully";
+              })
+              .catch(error => {
+                console.error("[HAR_RETRIGGER] Fetch error:", error);
+                window.postMessage({ 
+                  source: "HAR_EXTRACTOR", 
+                  type: "HAR_RETRIGGER_RESPONSE", 
+                  data: "Error: " + error.message 
+                }, "*");
+                return "Fetch failed: " + error.message;
+              });
+          })();
+        `;
+        
+        console.log("🔄 Evaluating script in inspected window for tab:", currentTabId);
+        chrome.devtools.inspectedWindow.eval(evalScript, (result: any, isException: any) => {
+          if (isException) {
+            console.error("🔄 Error evaluating script:", isException);
+          } else {
+            console.log("🔄 Script evaluation result:", result);
+          }
+        });
+      }
+    };
+
+    // Add the listener
+    chrome.runtime.onMessage.addListener(messageListener);
+
+    // Clean up the listener when panel is hidden/closed
+    panel.onHidden.addListener(() => {
+      chrome.runtime.onMessage.removeListener(messageListener);
+    });
+
     // Force a fresh read of patterns when panel is shown and set initial hash
     const currentPatterns = getUrlPatternsFromStorage();
     lastPatternHash = getPatternHash(currentPatterns);
@@ -394,7 +534,7 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
           "*"
         );
         reloadTimeout = null;
-      }, 500); // adjust debounce delay as needed
+      }, 100); // adjust debounce delay as needed
     }
 
     function sendInitialHar() {
@@ -511,6 +651,7 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
               },
               "*"
             );
+            console.log("📤 SENT INITIAL_HTTP_REQUEST for:", processedPayload.method, "at", new Date(startTime).toLocaleTimeString());
           });
         }
       });
@@ -629,6 +770,7 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
             },
             "*"
           );
+          console.log("📤 SENT HTTP_REQUEST for:", processedPayload.method, "at", new Date().toLocaleTimeString());
           scheduleHarReload();
         });
       });

@@ -1,5 +1,8 @@
 import { useState, useEffect } from "react";
 
+// Declare chrome API for TypeScript
+declare const chrome: any;
+
 export const useEditModal = (origin: string) => {
   const [editPayload, setEditPayload] = useState<any>(null);
   const [originalPayload, setOriginalPayload] = useState<any>(null);
@@ -7,6 +10,7 @@ export const useEditModal = (origin: string) => {
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [jsonValue, setJsonValue] = useState("");
   const [jsonError, setJsonError] = useState<string | null>(null);
+  const [resendUrl, setResendUrl] = useState<string>("");
 
   // Update jsonValue when editPayload changes
   useEffect(() => {
@@ -17,6 +21,9 @@ export const useEditModal = (origin: string) => {
   }, [editPayload]);
 
   const handleEditRequest = (payload: any, method: string) => {
+    // Extract the URL from the payload if it has _resendUrl
+    const url = payload?._resendUrl || (origin ? `${origin}/apexremote` : "");
+    setResendUrl(url);
     setEditPayload(payload);
     setOriginalPayload(payload);
     setEditMethod(method);
@@ -46,15 +53,27 @@ export const useEditModal = (origin: string) => {
   const handleSendRequest = () => {
     if (jsonError) return;
 
-    window.postMessage(
-      {
-        source: "HAR_EXTRACTOR",
-        type: "HAR_RETRIGGER",
-        url: origin ? `${origin}/apexremote` : "",
-        payload: editPayload,
-      },
-      "*"
-    );
+    // Get current tab ID from chrome.devtools
+    const currentTabId = (window as any).chrome?.devtools?.inspectedWindow?.tabId;
+
+    const retriggerMessage = {
+      source: "HAR_EXTRACTOR",
+      type: "HAR_RETRIGGER",
+      url: resendUrl,
+      method: editPayload?._method || 'POST',
+      payload: editPayload,
+      tabId: currentTabId, // Include the tab ID in the message
+    };
+    
+    console.log("[useEditModal] Sending HAR_RETRIGGER message for tab:", currentTabId, retriggerMessage);
+
+    // Use chrome.runtime.sendMessage to communicate with devtools.ts
+    if (chrome?.runtime?.sendMessage) {
+      chrome.runtime.sendMessage(retriggerMessage);
+    } else {
+      console.error("[useEditModal] chrome.runtime.sendMessage not available");
+    }
+    
     setEditModalOpen(false);
   };
 

@@ -88,14 +88,14 @@ export const EditModal: React.FC<EditModalProps> = ({
                   isDarkMode ? "text-gray-200" : "text-gray-700"
                 }`}
               >
-                Request Payload
+                Request Payload & Technical Details
               </h3>
               <p
                 className={`text-xs transition-colors duration-200 ${
                   isDarkMode ? "text-gray-400" : "text-gray-500"
                 }`}
               >
-                Edit the JSON payload below and re-trigger the request
+                Edit the complete request data below (includes payload, headers, and metadata for resending)
               </p>
             </div>
             <button

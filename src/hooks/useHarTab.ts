@@ -1,6 +1,9 @@
 import { useState, useEffect } from "react";
 import { v4 as uuidv4 } from "uuid";
 
+// Declare chrome API for TypeScript
+declare const chrome: any;
+
 function extractEndpointFromUrl(url: string): string {
   try {
     const urlObj = new URL(url);
@@ -95,10 +98,15 @@ export function useLiveHar() {
   useEffect(() => {
     if (listenerAttached) return;
     listenerAttached = true;
+    
+    console.log("[useLiveHar] Attaching message listener for HAR_RETRIGGER");
+    
     const onMessage = (event: MessageEvent) => {
       if (event.data?.source !== "HAR_EXTRACTOR") return;
 
       const { type, payload } = event.data;
+      
+      console.log("[useLiveHar] Received message type:", type);
 
       switch (type) {
         case "CLEAR_LOGS":
@@ -137,7 +145,7 @@ export function useLiveHar() {
             // Detect errors based on status code
             const hasMessages = payload.status && (payload.status >= 400);
             
-            console.log("Pushing HTTP row", payload.method, time);
+            const newId = uuidv4();
             setHttpRows((prev) => [
               ...prev,
               {
@@ -148,7 +156,7 @@ export function useLiveHar() {
                 time,
                 startTime,
                 endTime,
-                id: uuidv4(),
+                id: newId,
                 urlPattern: payload.urlPattern,
                 patternType: payload.patternType,
                 httpMethod: payload.httpMethod,
@@ -218,7 +226,6 @@ export function useLiveHar() {
             // Detect errors for APEXREMOTE as well
             const hasMessages = payload.status && (payload.status >= 400);
             
-            console.log("Pushing legacy APEXREMOTE row", payload.method, time);
             setHttpRows((prev) => [
               ...prev,
               {
@@ -290,6 +297,7 @@ export function useLiveHar() {
             const time = formatTime(rawDate);
             const startTime = rawDate.getTime();
             const endTime = payload.endTime ?? Date.now();
+            const hasMessages = payload.status && (payload.status >= 400);
             setHttpRows((prev) => [
               ...prev,
               {
@@ -498,22 +506,6 @@ export function useLiveHar() {
             // Process all entries
             entries.forEach(processEntry);
           });
-          break;
-        case "HAR_RETRIGGER":
-          if (event.data?.type === "HAR_RETRIGGER") {
-            chrome.devtools.inspectedWindow.eval(`
-              fetch("${event.data.url}", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: ${JSON.stringify(JSON.stringify(event.data.payload))},
-                credentials: "include"
-              }).then(r => r.text()).then(resp => {
-                window.postMessage({ source: "HAR_EXTRACTOR", type: "HAR_RETRIGGER_RESPONSE", data: resp }, "*");
-              }).catch(err => {
-                window.postMessage({ source: "HAR_EXTRACTOR", type: "HAR_RETRIGGER_RESPONSE", data: "Error: " + err.message }, "*");
-              });
-            `);
-          }
           break;
         default:
           break;
