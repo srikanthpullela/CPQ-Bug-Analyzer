@@ -68,8 +68,10 @@ const Turbo: React.FC = () => {
           Sync fields
         </label>
 
-        <nav className="sfdc-nav">
-          <Link to="/">Home</Link> | <Link to="/sfdc">SFDC</Link>
+        <nav className="py-1">
+          <Link to="/" className="text-xs text-blue-600 hover:text-blue-800">Home</Link> 
+          <span className="text-xs text-gray-500 mx-1">|</span> 
+          <Link to="/sfdc" className="text-xs text-blue-600 hover:text-blue-800">SFDC</Link>
         </nav>
       </header>
 

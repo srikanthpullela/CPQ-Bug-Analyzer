@@ -8,6 +8,7 @@ import SfdcResponse from "./SfdcResponse";
 import TurboRequest from "./TurboRequest";
 import TurboResponse from "./TurboResponse";
 import "./Sfdc.css"; // reuses the same styles
+import { ArrowLeft, Home } from "lucide-react";
 
 // Map the string key to the actual React component
 const pageMap: Record<string, React.FC<any>> = {
@@ -19,7 +20,7 @@ const pageMap: Record<string, React.FC<any>> = {
 
 const pageKeys = Object.keys(pageMap);
 
-const Home: React.FC = () => {
+const ComparisonTool: React.FC = () => {
   // picks for the left and right panels
   const [leftPage, setLeftPage] = useState<string>("SFDC Request");
   const [rightPage, setRightPage] = useState<string>("SFDC Response");
@@ -166,7 +167,18 @@ const Home: React.FC = () => {
   return (
     <div className="sfdc-root">
       <header className="sfdc-header enhanced-header">
+        {/* Compact Tool Title */}
+        {/* <div className="text-center py-1 bg-gradient-to-r from-blue-600 to-purple-600 text-white text-xs">
+          <span className="font-medium">Request/Response Comparison Tool</span>
+          <span className="ml-2 opacity-75">• Side-by-side analysis of SFDC and Turbo API calls</span>
+        </div> */}
+
         <div className="header-row">
+          <Link to="/" className="btn enhanced-btn">
+            <ArrowLeft className="w-4 h-4" />
+            <Home className="w-4 h-4" />
+            <span>Back to Home</span>
+          </Link>
           <div className="header-section page-selectors">
             <select
               value={leftPage}
@@ -250,7 +262,7 @@ const Home: React.FC = () => {
             </label>
           </div>
 
-          <nav className="sfdc-nav enhanced-nav">
+          {/* <nav className="sfdc-nav enhanced-nav">
             <Link to="/" className="nav-link">
               Home
             </Link>
@@ -262,7 +274,7 @@ const Home: React.FC = () => {
             <Link to="/turbo" className="nav-link">
               Turbo
             </Link>
-          </nav>
+          </nav> */}
         </div>
       </header>
 
@@ -333,4 +345,4 @@ const Home: React.FC = () => {
   );
 };
 
-export default Home;
+export default ComparisonTool;

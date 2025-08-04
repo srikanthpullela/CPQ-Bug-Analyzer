@@ -1,7 +1,8 @@
 // File: src/App.tsx
 import React from 'react';
 import { HashRouter, Routes, Route } from 'react-router-dom';
-import Home from './pages/Home';
+import LandingPage from './pages/LandingPage';
+import ComparisonTool from './pages/ComparisonTool';
 import Sfdc from './pages/Sfdc';
 import Turbo from './pages/Turbo';
 import JsonFormatter from './pages/JsonFormatter';
@@ -14,7 +15,8 @@ import { CodePieces } from "./pages/components/CodePieces";
 const App: React.FC = () => (
   <HashRouter>
     <Routes>
-      <Route path="/" element={<Home />} />
+      <Route path="/" element={<LandingPage />} />
+      <Route path="/compare-tool" element={<ComparisonTool />} />
       <Route path="/sfdc" element={<Sfdc />} />
       <Route path="/turbo" element={<Turbo />} />
       <Route path="/formatter" element={<JsonFormatter />} />

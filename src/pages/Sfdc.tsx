@@ -89,8 +89,10 @@ const Sfdc: React.FC = () => {
           Sync fields
         </label>
 
-        <nav className="sfdc-nav">
-          <Link to="/">Home</Link> | <Link to="/turbo">Turbo</Link>
+        <nav className="py-1">
+          <Link to="/" className="text-xs text-blue-600 hover:text-blue-800">Home</Link> 
+          <span className="text-xs text-gray-500 mx-1">|</span> 
+          <Link to="/turbo" className="text-xs text-blue-600 hover:text-blue-800">Turbo</Link>
         </nav>
       </header>
 
