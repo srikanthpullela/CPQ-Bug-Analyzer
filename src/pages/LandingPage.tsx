@@ -4,7 +4,7 @@ import React from "react";
 import { Link } from "react-router-dom";
 import BookmarksSection from "../components/BookmarksSection";
 import StickyHeader from "../components/StickyHeader";
-import { useScroll } from "../hooks/useScroll";
+import UserGuideSection from "../components/UserGuideSection";
 import { 
   Monitor, 
   FileText, 
@@ -28,8 +28,6 @@ import {
 } from "lucide-react";
 
 const LandingPage: React.FC = () => {
-  const { isScrolled, scrollDirection } = useScroll();
-  
   const features = [
     {
       icon: <Monitor className="w-8 h-8" />,
@@ -93,60 +91,27 @@ const LandingPage: React.FC = () => {
       <StickyHeader />
       
       {/* Hero Section */}
-      <header 
-        className={`relative overflow-hidden bg-gradient-to-r from-blue-600 via-purple-600 to-indigo-700 transition-all duration-500 ${
-          isScrolled && scrollDirection === 'up' 
-            ? 'transform scale-105 shadow-2xl' 
-            : ''
-        }`}
-      >
+      <header className="relative overflow-hidden bg-gradient-to-r from-blue-600 via-purple-600 to-indigo-700 transition-all duration-500 w-full max-w-full">
         <div className="absolute inset-0 bg-black/20"></div>
-        <div className={`relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 transition-all duration-500 ${
-          isScrolled && scrollDirection === 'up' 
-            ? 'py-32' 
-            : 'py-24'
-        }`}>
+        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 transition-all duration-500 py-24">
           <div className="text-center">
             <div className="flex justify-center items-center mb-6">
-              <div className={`p-4 bg-white/10 rounded-full backdrop-blur-sm transition-all duration-500 ${
-                isScrolled && scrollDirection === 'up' 
-                  ? 'transform scale-110 shadow-xl' 
-                  : ''
-              }`}>
-                <Bug className={`text-white transition-all duration-500 ${
-                  isScrolled && scrollDirection === 'up' 
-                    ? 'w-16 h-16' 
-                    : 'w-12 h-12'
-                }`} />
+              <div className="p-4 bg-white/10 rounded-full backdrop-blur-sm transition-all duration-500">
+                <Bug className="text-white transition-all duration-500 w-12 h-12" />
               </div>
             </div>
-            <h1 className={`font-bold text-white mb-6 transition-all duration-500 ${
-              isScrolled && scrollDirection === 'up' 
-                ? 'text-5xl md:text-7xl' 
-                : 'text-4xl md:text-6xl'
-            }`}>
+            <h1 className="font-bold text-white mb-6 transition-all duration-500 text-4xl md:text-6xl">
               <span className="text-red-400">Conga</span> Bug Analyzer
             </h1>
-            <p className={`text-blue-100 mb-8 max-w-3xl mx-auto transition-all duration-500 ${
-              isScrolled && scrollDirection === 'up' 
-                ? 'text-2xl md:text-3xl' 
-                : 'text-xl md:text-2xl'
-            }`}>
+            <p className="text-blue-100 mb-8 max-w-3xl mx-auto transition-all duration-500 text-xl md:text-2xl">
               Comprehensive debugging and analysis toolkit for Conga CPQ
               applications
             </p>
-            <div className={`flex flex-col sm:flex-row gap-4 justify-center transition-all duration-500 ${
-              isScrolled && scrollDirection === 'up' 
-                ? 'transform scale-110' 
-                : ''
-            }`}>
+            <div className="flex flex-col sm:flex-row gap-4 justify-center transition-all duration-500">
               <Link
                 to="/har"
-                className={`inline-flex items-center px-8 py-4 bg-white text-blue-600 font-semibold rounded-lg hover:bg-blue-50 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-1 ${
-                  isScrolled && scrollDirection === 'up' 
-                    ? 'shadow-2xl' 
-                    : ''
-                }`}
+                className="inline-flex items-center px-8 py-4 bg-white text-blue-600 font-semibold rounded-lg hover:bg-blue-50 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-1"
+                data-discover="true"
               >
                 <Monitor className="w-5 h-5 mr-2" />
                 Start Debugging
@@ -154,11 +119,8 @@ const LandingPage: React.FC = () => {
               </Link>
               <Link
                 to="/compare-tool"
-                className={`inline-flex items-center px-8 py-4 border-2 border-white text-white font-semibold rounded-lg hover:bg-white hover:text-blue-600 transition-all duration-200 ${
-                  isScrolled && scrollDirection === 'up' 
-                    ? 'shadow-xl' 
-                    : ''
-                }`}
+                className="inline-flex items-center px-8 py-4 border-2 border-white text-white font-semibold rounded-lg hover:bg-white hover:text-blue-600 transition-all duration-200"
+                data-discover="true"
               >
                 <GitCompare className="w-5 h-5 mr-2" />
                 Compare Tools
@@ -169,21 +131,13 @@ const LandingPage: React.FC = () => {
 
         {/* Decorative Background Elements */}
         <div className="absolute top-0 left-0 w-full h-full overflow-hidden pointer-events-none">
-          <div className={`absolute top-1/4 left-1/4 bg-white/5 rounded-full blur-3xl transition-all duration-700 ${
-            isScrolled && scrollDirection === 'up' 
-              ? 'w-80 h-80 animate-pulse' 
-              : 'w-64 h-64'
-          }`}></div>
-          <div className={`absolute bottom-1/4 right-1/4 bg-purple-400/10 rounded-full blur-3xl transition-all duration-700 ${
-            isScrolled && scrollDirection === 'up' 
-              ? 'w-112 h-112 animate-pulse' 
-              : 'w-96 h-96'
-          }`}></div>
+          <div className="absolute top-1/4 left-1/4 bg-white/5 rounded-full blur-3xl transition-all duration-700 w-64 h-64"></div>
+          <div className="absolute bottom-1/4 right-1/4 bg-purple-400/10 rounded-full blur-3xl transition-all duration-700 w-96 h-96"></div>
         </div>
       </header>
 
       {/* Features Grid */}
-      <section className="py-20 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
+      <section data-section="features-grid" className="py-20 px-4 sm:px-6 lg:px-8 max-w-7xl mx-auto">
         <div className="text-center mb-16">
           <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">
             Powerful Debugging Tools
@@ -240,10 +194,17 @@ const LandingPage: React.FC = () => {
       </section>
 
       {/* Bookmarks Section */}
-      <BookmarksSection />
+      <div data-section="bookmarks">
+        <BookmarksSection />
+      </div>
+
+      {/* User Guide Section */}
+      <div data-section="user-guide">
+        <UserGuideSection />
+      </div>
 
       {/* Key Features Section */}
-      <section className="py-20 bg-gray-50">
+      <section data-section="key-features" className="py-20 bg-gray-50">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-16">
             <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">
@@ -299,7 +260,7 @@ const LandingPage: React.FC = () => {
       </section>
 
       {/* Quick Start Section */}
-      <section className="py-20">
+      <section data-section="quick-start" className="py-20">
         <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 text-center">
           <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mb-8">
             Get Started in Minutes

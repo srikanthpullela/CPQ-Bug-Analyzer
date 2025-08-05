@@ -2,10 +2,24 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* React PDF styles */
+@import 'react-pdf/dist/esm/Page/AnnotationLayer.css';
+@import 'react-pdf/dist/esm/Page/TextLayer.css';
 /* Global resets */
 body {
   margin: 0;
   font-family: Arial, sans-serif;
+  overflow-x: hidden; /* Prevent horizontal scroll */
+}
+
+html, body {
+  max-width: 100%;
+  overflow-x: hidden; /* Ensure no horizontal overflow */
+}
+
+* {
+  box-sizing: border-box;
 }
 
 .main {
