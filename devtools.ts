@@ -537,6 +537,34 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
       }, 100); // adjust debounce delay as needed
     }
 
+    // Add periodic HAR reload to ensure we catch all requests since we disabled live tracking
+    let periodicReloadInterval: ReturnType<typeof setInterval> | null = null;
+    
+    const startPeriodicReload = () => {
+      if (periodicReloadInterval) clearInterval(periodicReloadInterval);
+      periodicReloadInterval = setInterval(() => {
+        panelWindow.postMessage(
+          { source: "HAR_EXTRACTOR", type: "REQUEST_HAR_RELOAD" },
+          "*"
+        );
+      }, 100); // Every 2 seconds to catch requests we might miss
+    };
+    
+    const stopPeriodicReload = () => {
+      if (periodicReloadInterval) {
+        clearInterval(periodicReloadInterval);
+        periodicReloadInterval = null;
+      }
+    };
+    
+    // Start periodic reload when panel is shown
+    startPeriodicReload();
+    
+    // Clean up on panel hidden
+    panel.onHidden.addListener(() => {
+      stopPeriodicReload();
+    });
+
     function sendInitialHar() {
       if (!chrome.devtools.network.getHAR) return;
 
@@ -552,7 +580,7 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
         lastPatternHash = currentPatternHash;
         
         for (const entry of harLog.entries || []) {
-          const rid = (entry as any)._requestId;
+          const rid = (entry as any).requestId || (entry as any)._requestId;
           
           // If patterns haven't changed, skip already processed requests
           if (!patternsChanged && seenRequests.has(rid)) {
@@ -657,6 +685,8 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
       });
     }
 
+    // DISABLED: Live tracking to avoid duplicates - relying on HAR reload only
+    /*
     chrome.devtools.network.onRequestFinished.addListener((request) => {
       const rid = (request as any).requestId || (request as any)._requestId;
       if (rid && seenRequests.has(rid)) return;
@@ -775,6 +805,7 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
         });
       });
     });
+    */
 
     panelWindow.postMessage({ source: "HAR_EXTRACTOR", type: "INIT" }, "*");
 
@@ -783,7 +814,8 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
 
       if (event.data.type === "REQUEST_HAR_RELOAD") {
         console.log("🔁 Panel requested HAR reload");
-        sendInitialHar();
+        // Don't call sendInitialHar() here to avoid duplicates with live tracking
+        // The useHarTab.ts will handle HAR reload processing directly
       }
 
       if (event.data.type === "CLEAR_LOGS") {
