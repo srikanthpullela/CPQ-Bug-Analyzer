@@ -385,6 +385,11 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
             "Failed to attach debugger:",
             chrome.runtime.lastError.message
           );
+          // Notify panel that debugger failed to attach
+          panelWindow.postMessage(
+            { source: "HAR_EXTRACTOR", type: "DEBUGGER_DISCONNECTED" },
+            "*"
+          );
           return;
         }
         debuggerAttached = true;
@@ -392,6 +397,26 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
 
         chrome.debugger.sendCommand(debuggee, "Network.enable", {});
         chrome.debugger.sendCommand(debuggee, "Page.enable", {});
+        
+        // Notify panel that debugger is connected
+        panelWindow.postMessage(
+          { source: "HAR_EXTRACTOR", type: "DEBUGGER_RECONNECTED" },
+          "*"
+        );
+      });
+
+      // Listen for debugger detach events
+      chrome.debugger.onDetach.addListener((detachedDebuggee: any, reason: string) => {
+        if (detachedDebuggee.tabId === currentTabId) {
+          console.warn("🔌 Debugger detached:", reason);
+          debuggerAttached = false;
+          
+          // Notify panel that debugger was disconnected
+          panelWindow.postMessage(
+            { source: "HAR_EXTRACTOR", type: "DEBUGGER_DISCONNECTED" },
+            "*"
+          );
+        }
       });
     }
 
@@ -401,6 +426,12 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
 
     function handleEvent(source, method, params) {
       if (source.tabId !== currentTabId) return;
+
+      // Auto-reload on request completion to fix status 0 issues
+      if (method === "Network.responseReceived" || method === "Network.loadingFinished") {
+        console.log(`📡 Network event: ${method} - scheduling reload to capture final status`);
+        scheduleHarReload();
+      }
 
       if (
         method === "Network.webSocketFrameReceived" ||
@@ -537,17 +568,60 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
       }, 100); // adjust debounce delay as needed
     }
 
-    // Add periodic HAR reload to ensure we catch all requests since we disabled live tracking
+    // Enhanced auto-reload system to catch completed requests and fix status 0 issues
     let periodicReloadInterval: ReturnType<typeof setInterval> | null = null;
+    let lastHarEntryCount = 0;
+    let lastCompletedCount = 0;
+    let pendingRequestIds = new Set<string>();
     
     const startPeriodicReload = () => {
       if (periodicReloadInterval) clearInterval(periodicReloadInterval);
       periodicReloadInterval = setInterval(() => {
-        panelWindow.postMessage(
-          { source: "HAR_EXTRACTOR", type: "REQUEST_HAR_RELOAD" },
-          "*"
-        );
-      }, 100); // Every 2 seconds to catch requests we might miss
+        // Only trigger reload if there might be new entries
+        if (chrome?.devtools?.network?.getHAR) {
+          chrome.devtools.network.getHAR((harLog) => {
+            const currentEntryCount = harLog.entries?.length || 0;
+            
+            // Count completed requests (non-zero status or finished)
+            let completedCount = 0;
+            let newPendingIds = new Set<string>();
+            
+            harLog.entries?.forEach(entry => {
+              const requestId = (entry as any).requestId || (entry as any)._requestId || entry.request.url;
+              const isCompleted = entry.response?.status && entry.response.status > 0;
+              const hasTimings = entry.timings && entry.timings.receive >= 0;
+              
+              if (isCompleted || hasTimings) {
+                completedCount++;
+              } else {
+                newPendingIds.add(requestId);
+              }
+            });
+            
+            // Trigger reload if:
+            // 1. New entries appeared
+            // 2. More requests completed (fixing status 0 -> 200 issues)
+            // 3. Previously pending requests are now completed
+            const shouldReload = 
+              currentEntryCount !== lastHarEntryCount || 
+              completedCount > lastCompletedCount ||
+              (pendingRequestIds.size > newPendingIds.size);
+            
+            if (shouldReload) {
+              console.log(`🔄 Auto-reload triggered: entries ${lastHarEntryCount}->${currentEntryCount}, completed ${lastCompletedCount}->${completedCount}, pending ${pendingRequestIds.size}->${newPendingIds.size}`);
+              
+              lastHarEntryCount = currentEntryCount;
+              lastCompletedCount = completedCount;
+              pendingRequestIds = newPendingIds;
+              
+              panelWindow.postMessage(
+                { source: "HAR_EXTRACTOR", type: "REQUEST_HAR_RELOAD" },
+                "*"
+              );
+            }
+          });
+        }
+      }, 150); // Slightly slower to reduce CPU usage but still responsive
     };
     
     const stopPeriodicReload = () => {
@@ -655,8 +729,10 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
               matchedPattern
             );
 
-            // Detect errors based on status code
-            const hasMessages = entry.response.status && (entry.response.status >= 400);
+            // Enhanced error detection and status handling
+            const status = entry.response?.status || 0;
+            const hasMessages = status >= 400 || status === 0; // Include status 0 as potential issue
+            const isCompleted = status > 0 && entry.timings?.receive >= 0;
 
             panelWindow.postMessage(
               {
@@ -668,6 +744,7 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
                   baseUrl: new URL(entry.request.url).origin,
                   endTime,
                   hasMessages,
+                  isCompleted,
                   // Always include header data for consistency
                   requestHeaders: entry.request.headers || [],
                   responseHeaders: entry.response?.headers || [],
@@ -675,11 +752,20 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
                     request: entry.request.headers || [],
                     response: entry.response?.headers || []
                   },
+                  // Add debug info for status issues
+                  _debug: {
+                    originalStatus: status,
+                    hasResponse: !!entry.response,
+                    hasTimings: !!entry.timings,
+                    receiveTime: entry.timings?.receive || -1,
+                    totalTime: entry.time || 0,
+                    entryComplete: isCompleted
+                  }
                 },
               },
               "*"
             );
-            console.log("📤 SENT INITIAL_HTTP_REQUEST for:", processedPayload.method, "at", new Date(startTime).toLocaleTimeString());
+            console.log(`📤 SENT INITIAL_HTTP_REQUEST for: ${processedPayload.method} (status: ${status}, completed: ${isCompleted}) at ${new Date(startTime).toLocaleTimeString()}`);
           });
         }
       });
@@ -809,8 +895,11 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
 
     panelWindow.postMessage({ source: "HAR_EXTRACTOR", type: "INIT" }, "*");
 
-    window.addEventListener("message", (event) => {
+    // Listen for messages from the panel window (React app)
+    const handlePanelMessage = (event) => {
       if (event.data?.source !== "HAR_EXTRACTOR") return;
+
+      console.log("🔌 DevTools received message:", event.data.type);
 
       if (event.data.type === "REQUEST_HAR_RELOAD") {
         console.log("🔁 Panel requested HAR reload");
@@ -917,7 +1006,79 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
           );
         }
       }
-    });
+
+      if (event.data.type === "RECONNECT_DEBUGGER") {
+        console.log("🔌 DevTools received RECONNECT_DEBUGGER message");
+        
+        const forceReconnection = () => {
+          console.log("🔌 Force reconnection - resetting debugger state");
+          debuggerAttached = false;
+          
+          // Try to detach first, ignoring any errors
+          try {
+            chrome.debugger.detach(debuggee);
+            console.log("🔌 Force detached debugger");
+          } catch (error) {
+            console.log("🔌 Force detach failed (expected):", error.message);
+          }
+          
+          // Wait a moment then try to attach
+          setTimeout(() => {
+            console.log("🔌 Attempting fresh attachment...");
+            chrome.debugger.attach(debuggee, "1.3", () => {
+              if (chrome.runtime.lastError) {
+                console.error("❌ Failed to attach debugger:", chrome.runtime.lastError.message);
+                
+                // If it fails because already attached, try to work with existing connection
+                if (chrome.runtime.lastError.message.includes("already attached")) {
+                  console.log("🔌 Debugger already attached, assuming it's working");
+                  debuggerAttached = true;
+                  
+                  // Enable domains on existing connection
+                  chrome.debugger.sendCommand(debuggee, "Network.enable", {});
+                  chrome.debugger.sendCommand(debuggee, "Page.enable", {});
+                  
+                  panelWindow.postMessage(
+                    { source: "HAR_EXTRACTOR", type: "DEBUGGER_RECONNECTED" },
+                    "*"
+                  );
+                  sendInitialHar();
+                } else {
+                  panelWindow.postMessage(
+                    { source: "HAR_EXTRACTOR", type: "DEBUGGER_DISCONNECTED" },
+                    "*"
+                  );
+                }
+                return;
+              }
+              
+              debuggerAttached = true;
+              console.log("✅ Debugger successfully attached");
+
+              // Enable the required domains
+              chrome.debugger.sendCommand(debuggee, "Network.enable", {});
+              chrome.debugger.sendCommand(debuggee, "Page.enable", {});
+              
+              // Notify panel that debugger is reconnected
+              panelWindow.postMessage(
+                { source: "HAR_EXTRACTOR", type: "DEBUGGER_RECONNECTED" },
+                "*"
+              );
+              
+              // Trigger initial HAR load after reconnection
+              sendInitialHar();
+            });
+          }, 300);
+        };
+
+        // Always force reconnection for reliability
+        forceReconnection();
+      }
+    };
+
+    // Listen on both panelWindow and window to ensure we catch all messages
+    panelWindow.addEventListener("message", handlePanelMessage);
+    window.addEventListener("message", handlePanelMessage);
 
     sendInitialHar();
   });

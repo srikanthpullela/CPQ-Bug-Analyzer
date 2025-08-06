@@ -243,7 +243,7 @@ const HarMethodsTabPage: React.FC = () => {
           <div className="h-full flex flex-col">
             {/* Sticky Header Section */}
             <div className="sticky top-0 z-10 bg-inherit border-b border-gray-200 dark:border-gray-700">
-              <div className="p-2">
+              <div className="p-2 space-y-2">
                 <HeaderSection
                   isDarkMode={isDarkMode}
                   totalRequests={totalRequests}
