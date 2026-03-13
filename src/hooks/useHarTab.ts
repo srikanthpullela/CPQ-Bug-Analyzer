@@ -86,6 +86,7 @@ export function useLiveHar() {
   const [httpRows, setHttpRows] = useState<HttpRow[]>([]);
   const [wsRows, setWsRows] = useState<WsRow[]>([]);
   const [wsBaseUrl, setWsBaseUrl] = useState<string>("");
+  const [isLoading, setIsLoading] = useState<boolean>(false);
   let listenerAttached = false;
 
   const formatTime = (date: Date) => {
@@ -109,16 +110,28 @@ export function useLiveHar() {
       console.log("[useLiveHar] Received message type:", type);
 
       switch (type) {
+        case "LOADING_START":
+          console.log("[useLiveHar] Network capture started");
+          setIsLoading(true);
+          break;
+
+        case "LOADING_END":
+          console.log("[useLiveHar] Network capture completed");
+          setIsLoading(false);
+          break;
+
         case "CLEAR_LOGS":
           setHttpRows([]);
           setWsRows([]);
           setWsBaseUrl("");
+          setIsLoading(false);
           break;
 
         case "CLEAR":
           setHttpRows([]);
           setWsRows([]);
           setWsBaseUrl("");
+          setIsLoading(false);
           break;
 
         case "WS_BASE_URL":
@@ -415,7 +428,7 @@ export function useLiveHar() {
 
                 // Use a timeout for getContent to avoid hanging
                 const timeoutId = setTimeout(() => {
-                  console.warn(`[useLiveHar] Timeout getting content for entry ${index}`);
+                  console.debug(`[useLiveHar] Timeout getting content for entry ${index}`);
                   failed++;
                   completed++;
                   checkCompletion();
@@ -523,5 +536,6 @@ export function useLiveHar() {
     httpRows,
     wsRows,
     wsBaseUrl,
+    isLoading,
   };
 }

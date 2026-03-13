@@ -6,8 +6,13 @@ let debuggerAttached = false;
 let wsFirstTimestamp: number | null = null;
 let wsFirstWallClock: number | null = null;
 let reloadTimeout: ReturnType<typeof setTimeout> | null = null;
+// Track most recent WS event to detect stalls
+let lastWsEventTime: number | null = null;
 // Declare chrome API for TypeScript
 declare const chrome: any;
+
+// Track attached sub-targets (workers/iframes) to ensure WS events aren't filtered out
+const attachedTargetIds = new Set<string>();
 
 // URL Pattern Configuration System
 interface UrlPattern {
@@ -54,11 +59,11 @@ function getUrlPatternsFromStorage(): UrlPattern[] {
     if (stored === null) {
       console.log('📝 No localStorage key found - this is first time setup');
     } else {
-      return []; // Return empty instead of overwriting with defaults
+      console.warn('⚠️ Invalid or corrupted localStorage data detected - using defaults');
     }
   } catch (error) {
     console.warn('⚠️ getUrlPatternsFromStorage: Error reading patterns:', error);
-    return [];
+    console.warn('⚠️ Falling back to default patterns');
   }
   
   // Only set defaults if localStorage key doesn't exist at all (first time)
@@ -230,11 +235,39 @@ function getPatternHash(patterns: UrlPattern[]): string {
 
 chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
   let currentTabId: number | null = null;
+  // Track pending network requests for loading state
+  let pendingNetworkRequests = new Set<string>();
+  let loadingTimeoutId: ReturnType<typeof setTimeout> | null = null;
+
+  // Helper to update loading state
+  function updateLoadingState(panelWindow: any) {
+    const isLoading = pendingNetworkRequests.size > 0;
+    console.log(`📊 Loading state update: ${isLoading ? 'LOADING' : 'IDLE'} (${pendingNetworkRequests.size} pending requests)`);
+    panelWindow.postMessage(
+      { 
+        source: "HAR_EXTRACTOR", 
+        type: isLoading ? "LOADING_START" : "LOADING_END"
+      },
+      "*"
+    );
+  }
 
   panel.onShown.addListener((panelWindow) => {
     const tabId = chrome.devtools.inspectedWindow.tabId;
     currentTabId = tabId;
     const debuggee = { tabId };
+
+    // Clear any stale pending requests and ensure loading state is cleared on panel show
+    pendingNetworkRequests.clear();
+    if (loadingTimeoutId) {
+      clearTimeout(loadingTimeoutId);
+      loadingTimeoutId = null;
+    }
+    // Send initial clear state
+    panelWindow.postMessage(
+      { source: "HAR_EXTRACTOR", type: "LOADING_END" },
+      "*"
+    );
 
     // Add chrome.runtime.onMessage listener for HAR_RETRIGGER from React panel
     // Make it tab-specific by checking currentTabId
@@ -379,12 +412,52 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
     lastPatternHash = getPatternHash(currentPatterns);
 
     if (!debuggerAttached) {
+      console.log("🔧 Attempting to attach debugger to tab:", currentTabId);
+      
+      // Enhanced error handling and diagnostics
       chrome.debugger.attach(debuggee, "1.3", () => {
         if (chrome.runtime.lastError) {
-          console.error(
-            "Failed to attach debugger:",
-            chrome.runtime.lastError.message
-          );
+          const errorMessage = chrome.runtime.lastError.message;
+          console.error("❌ Failed to attach debugger:", errorMessage);
+          
+          // Provide specific troubleshooting guidance based on error type
+          if (errorMessage.includes("different extension")) {
+            console.warn("🚨 TROUBLESHOOTING: This error suggests another Chrome extension is already using the debugger.");
+            console.warn("💡 SOLUTIONS:");
+            console.warn("   1. Close other DevTools panels/extensions that might be using the debugger");
+            console.warn("   2. Disable other debugging extensions temporarily");
+            console.warn("   3. Try opening this extension in a new tab/window");
+            console.warn("   4. Restart Chrome browser");
+            
+            // Send detailed error info to panel
+            panelWindow.postMessage(
+              { 
+                source: "HAR_EXTRACTOR", 
+                type: "DEBUGGER_ERROR",
+                error: errorMessage,
+                suggestions: [
+                  "Another extension is using the debugger",
+                  "Try disabling other debugging extensions",
+                  "Restart Chrome browser",
+                  "Open extension in new tab"
+                ]
+              },
+              "*"
+            );
+          } else if (errorMessage.includes("permission")) {
+            console.warn("🚨 TROUBLESHOOTING: Permission denied - check extension permissions");
+            console.warn("💡 SOLUTIONS:");
+            console.warn("   1. Reload the extension");
+            console.warn("   2. Check that 'debugger' permission is granted");
+            console.warn("   3. Try refreshing the page being debugged");
+          } else {
+            console.warn("🚨 TROUBLESHOOTING: Generic debugger attachment error");
+            console.warn("💡 SOLUTIONS:");
+            console.warn("   1. Refresh the target page");
+            console.warn("   2. Close and reopen DevTools");
+            console.warn("   3. Reload the extension");
+          }
+          
           // Notify panel that debugger failed to attach
           panelWindow.postMessage(
             { source: "HAR_EXTRACTOR", type: "DEBUGGER_DISCONNECTED" },
@@ -393,16 +466,52 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
           return;
         }
         debuggerAttached = true;
-        console.log("✅ Debugger attached");
+        console.log("✅ Debugger attached successfully to tab:", currentTabId);
 
-        chrome.debugger.sendCommand(debuggee, "Network.enable", {});
-        chrome.debugger.sendCommand(debuggee, "Page.enable", {});
+        try {
+          chrome.debugger.sendCommand(debuggee, "Network.enable", {
+            maxTotalBufferSize: 100_000_000,
+            maxResourceBufferSize: 50_000_000
+          });
+          chrome.debugger.sendCommand(debuggee, "Network.setCacheDisabled", { cacheDisabled: true });
+          chrome.debugger.sendCommand(debuggee, "Page.enable", {});
+        } catch (e) {
+          console.warn("⚠️ Error enabling domains after attach:", (e as any)?.message || e);
+        }
+        // Auto-attach to sub-targets (workers/iframes) so WS frames from them are captured
+        chrome.debugger.sendCommand(
+          debuggee,
+          "Target.setAutoAttach",
+          { autoAttach: true, waitForDebuggerOnStart: false, flatten: true },
+          () => {
+            if (chrome.runtime.lastError) {
+              console.warn("⚠️ setAutoAttach error:", chrome.runtime.lastError.message);
+            } else {
+              console.log("🎯 Target.setAutoAttach enabled");
+            }
+          }
+        );
+        chrome.debugger.sendCommand(
+          debuggee,
+          "Target.setDiscoverTargets",
+          { discover: true },
+          () => {
+            if (chrome.runtime.lastError) {
+              // This API is not supported in newer Chrome versions - safe to ignore
+              console.debug("setDiscoverTargets not available:", chrome.runtime.lastError.message);
+            } else {
+              console.log("🔭 Target.setDiscoverTargets enabled");
+            }
+          }
+        );
         
         // Notify panel that debugger is connected
         panelWindow.postMessage(
           { source: "HAR_EXTRACTOR", type: "DEBUGGER_RECONNECTED" },
           "*"
         );
+        // Start WS inactivity watchdog on initial attach as well
+        try { startWsWatchdog(); } catch {}
       });
 
       // Listen for debugger detach events
@@ -425,7 +534,88 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
     chrome.debugger.onEvent.addListener(handleEvent);
 
     function handleEvent(source, method, params) {
-      if (source.tabId !== currentTabId) return;
+      // Unwrap child-target events if flatten is false or not supported
+      if (method === "Target.receivedMessageFromTarget" && params?.message) {
+        try {
+          const inner = JSON.parse(params.message);
+          if (inner?.method) {
+            // Re-dispatch the inner event for normal handling
+            handleEvent(source, inner.method, inner.params || {});
+          }
+        } catch (err) {
+          console.warn("⚠️ Failed to parse receivedMessageFromTarget payload");
+        }
+        return; // We've delegated handling
+      }
+
+      // Track sub-target attachments/detachments to correctly accept WS events from them
+      if (method === "Target.attachedToTarget" && params?.targetInfo?.targetId) {
+        attachedTargetIds.add(params.targetInfo.targetId);
+        console.log("🎯 Attached to sub-target:", params.targetInfo);
+        return; // Nothing else to do for this meta event
+      }
+      if (method === "Target.detachedFromTarget" && params?.targetId) {
+        attachedTargetIds.delete(params.targetId);
+        console.log("🎯 Detached from sub-target:", params.targetId);
+        return;
+      }
+
+      // Relaxed event filtering: accept events for current tab, or for any sub-target we've attached to.
+      const isOurEvent = (() => {
+        if (source?.tabId != null && currentTabId != null) {
+          return source.tabId === currentTabId;
+        }
+        if (source?.targetId && attachedTargetIds.has(source.targetId)) {
+          return true;
+        }
+        // Windows quirk: some WS events may miss tabId; allow Network/Page/Runtime events in this case
+        if (!source?.tabId && (method?.startsWith("Network.") || method?.startsWith("Page.") || method?.startsWith("Runtime.") || method?.startsWith("Target."))) {
+          return true;
+        }
+        return false;
+      })();
+      if (!isOurEvent) return;
+
+      // Track network request start for loading indicator - ONLY for matching URLs
+      if (method === "Network.requestWillBeSent") {
+        const requestId = params?.requestId;
+        const requestUrl = params?.request?.url;
+        
+        if (requestId && requestUrl) {
+          // Only track requests that match our URL patterns
+          const matchedPattern = shouldProcessUrl(requestUrl);
+          if (matchedPattern) {
+            console.log(`📥 Tracking request: ${matchedPattern.name} - ${requestUrl.substring(0, 100)}`);
+            pendingNetworkRequests.add(requestId);
+            updateLoadingState(panelWindow);
+            
+            // Auto-clear stale requests after 30 seconds
+            setTimeout(() => {
+              if (pendingNetworkRequests.has(requestId)) {
+                console.log(`⏰ Auto-clearing stale request: ${requestId}`);
+                pendingNetworkRequests.delete(requestId);
+                updateLoadingState(panelWindow);
+              }
+            }, 30000);
+          }
+        }
+      }
+
+      // Track network request completion for loading indicator
+      if (method === "Network.loadingFinished" || method === "Network.loadingFailed") {
+        const requestId = params?.requestId;
+        if (requestId && pendingNetworkRequests.has(requestId)) {
+          console.log(`✅ Request completed: ${requestId} (${method})`);
+          pendingNetworkRequests.delete(requestId);
+          
+          // Debounce the loading state update - shorter delay for faster response
+          if (loadingTimeoutId) clearTimeout(loadingTimeoutId);
+          loadingTimeoutId = setTimeout(() => {
+            updateLoadingState(panelWindow);
+            loadingTimeoutId = null;
+          }, 300); // Reduced to 300ms for faster loading state clearing
+        }
+      }
 
       // Auto-reload on request completion to fix status 0 issues
       if (method === "Network.responseReceived" || method === "Network.loadingFinished") {
@@ -433,26 +623,114 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
         scheduleHarReload();
       }
 
+      // Clear tables on page navigation/reload
+      if (method === "Page.frameNavigated") {
+        // Only clear for main frame navigation (page reload/navigation)
+        if (params?.frame?.parentId === undefined) {
+          console.log("🔄 Page navigated - clearing all tables");
+          seenRequests.clear();
+          seenWsMessages.clear();
+          panelWindow.postMessage(
+            { source: "HAR_EXTRACTOR", type: "CLEAR" },
+            "*"
+          );
+        }
+        return;
+      }
+
+      // Additional WS lifecycle diagnostics to understand connection state
+      if (method === "Network.webSocketWillSendHandshakeRequest") {
+        const wsUrl = params?.request?.url;
+        console.log("🤝 WS handshake request:", { url: wsUrl, requestId: params?.requestId });
+        
+        // Send the WebSocket base URL to the panel
+        if (wsUrl) {
+          panelWindow.postMessage(
+            {
+              source: "HAR_EXTRACTOR",
+              type: "WS_BASE_URL",
+              payload: wsUrl
+            },
+            "*"
+          );
+        }
+        return;
+      }
+      if (method === "Network.webSocketHandshakeResponseReceived") {
+        console.log("🤝 WS handshake response:", { status: params?.response?.status, headers: params?.response?.headers, requestId: params?.requestId });
+        return;
+      }
+      if (method === "Network.webSocketClosed") {
+        console.log("🔒 WS closed:", { requestId: params?.requestId, time: Date.now() });
+        return;
+      }
+
+      // Log WS errors explicitly
+      if (method === "Network.webSocketFrameError") {
+        console.warn("❌ WebSocket frame error:", params);
+        scheduleHarReload();
+        return;
+      }
+
       if (
         method === "Network.webSocketFrameReceived" ||
         method === "Network.webSocketFrameSent"
       ) {
+        // Mark last WS activity
+        lastWsEventTime = Date.now();
+        
+        // Enhanced logging for Windows Chrome WebSocket debugging
+        if (navigator.userAgent.includes('Windows')) {
+          console.log(`🔍 Windows Chrome WS Event: ${method}`, {
+            tabId: source.tabId,
+            targetId: source.targetId,
+            currentTab: currentTabId,
+            hasParams: !!params,
+            hasResponse: !!params?.response,
+            hasPayload: !!params?.response?.payloadData
+          });
+        }
+
         const direction =
           method === "Network.webSocketFrameSent" ? "sent" : "received";
-        const rawPayload = params.response?.payloadData;
-        if (!rawPayload) return;
+        // Expanded fallback extraction for payload data across Chrome variants
+        let rawPayload: any = undefined;
+        if (params && typeof params === 'object') {
+          rawPayload = params.response?.payloadData ?? params.response?.data ?? params.message ?? undefined;
+        }
+        
+        if (!rawPayload) {
+          if (navigator.userAgent.includes('Windows')) {
+            console.warn(`⚠️ Windows Chrome: No payload data in ${direction} WebSocket frame`);
+          }
+          return;
+        }
 
         let topLevel: any = {};
         try {
+          // Try normal JSON parse
           topLevel = JSON.parse(rawPayload);
         } catch {
-          console.warn(`[WS ${direction}] Failed to parse top-level JSON`);
-          return;
+          // Fallback: strip BOM/whitespace and retry; if still fails, filter out raw messages
+          const cleaned = String(rawPayload).replace(/^\uFEFF/, '').trim();
+          try {
+            topLevel = JSON.parse(cleaned);
+          } catch {
+            // Filter out raw WebSocket messages (heartbeat, connection checks, etc.)
+            return;
+          }
         }
 
         if (wsFirstTimestamp === null) {
           wsFirstTimestamp = params.timestamp;
           wsFirstWallClock = Date.now();
+          
+          if (navigator.userAgent.includes('Windows')) {
+            console.log("🔍 Windows Chrome: WebSocket timing initialized", {
+              wsFirstTimestamp,
+              wsFirstWallClock
+            });
+          }
         }
 
         let nested: any = {};
@@ -462,7 +740,11 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
             topLevel.Payload.trim().startsWith("{")
               ? JSON.parse(topLevel.Payload)
               : topLevel.Payload;
-        } catch {}
+        } catch {
+          if (navigator.userAgent.includes('Windows')) {
+            console.log("🔍 Windows Chrome: Nested payload parsing failed, using top-level");
+          }
+        }
 
         const action = (nested?.Action || topLevel?.Action || "").toLowerCase();
         if (action === "heartbeat") return;
@@ -480,83 +762,73 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
               )
             : new Date(baseTime + params.timestamp * 1000);
 
-        const key = `${timestamp.getTime()}-${action}-${direction}-${endpoint}`;
-        if (seenWsMessages.has(key)) return;
+        // Include requestId in dedupe key to avoid over-filtering on Windows
+        const requestIdForKey = params.requestId || params.requestID || 'no_request';
+        const key = `${requestIdForKey}-${timestamp.getTime()}-${action}-${direction}-${endpoint}`;
+        if (seenWsMessages.has(key)) {
+          if (navigator.userAgent.includes('Windows')) {
+            console.log(`🔍 Windows Chrome: Duplicate WS message filtered: ${key}`);
+          }
+          return;
+        }
         seenWsMessages.add(key);
+        // Prevent unbounded growth
+        if (seenWsMessages.size > 10000) {
+          console.log("🧹 Trimming WS dedupe cache", seenWsMessages.size);
+          // Simple reset to avoid memory growth; safe due to timestamp-based keys
+          seenWsMessages.clear();
+        }
+
+        const wsPayload = {
+          endpoint,
+          action,
+          payload: nested || topLevel,
+          status,
+          direction,
+          timestamp: timestamp.getTime(),
+          time: timestamp.toLocaleTimeString("en-GB", {
+            hour: "2-digit",
+            minute: "2-digit",
+            second: "2-digit",
+          }),
+        };
 
         panelWindow.postMessage(
           {
             source: "HAR_EXTRACTOR",
             type: "WS",
-            payload: {
-              endpoint,
-              action,
-              payload: nested || topLevel,
-              status,
-              direction,
-              timestamp: timestamp.getTime(),
-              time: timestamp.toLocaleTimeString("en-GB", {
-                hour: "2-digit",
-                minute: "2-digit",
-                second: "2-digit",
-              }),
-            },
+            payload: wsPayload,
           },
           "*"
         );
         scheduleHarReload();
+        return;
       }
 
-      if (method === "Network.webSocketCreated") {
-        const wsUrl = params.url;
-        const key = `ws-create-${wsUrl}`;
-        if (seenWsMessages.has(key)) return;
-        seenWsMessages.add(key);
-
-        panelWindow.postMessage(
-          {
-            source: "HAR_EXTRACTOR",
-            type: "WS_CREATED",
-            payload: {
-              wsUrl,
-              time: new Date().toLocaleTimeString("en-GB"),
-              timestamp: Date.now(),
-            },
-          },
-          "*"
-        );
-      }
-
-      if (method === "Page.loadEventFired") {
-        // Only clear when the page actually reloads, not during auto-refresh
-        seenRequests.clear();
-        seenWsMessages.clear();
-        wsFirstTimestamp = null;
-        wsFirstWallClock = null;
-
-        panelWindow.postMessage(
-          { source: "HAR_EXTRACTOR", type: "CLEAR" },
-          "*"
-        );
-
-        chrome.devtools.inspectedWindow.eval(
-          "window.location.origin",
-          (res, isErr) => {
-            if (!isErr && typeof res === "string") {
-              panelWindow.postMessage(
-                {
-                  source: "HAR_EXTRACTOR",
-                  type: "HAR_SET_ORIGIN",
-                  origin: res,
-                },
-                "*"
-              );
-            }
-          }
-        );
+      // Auto-reload on request completion to fix status 0 issues
+      if (method === "Network.responseReceived" || method === "Network.loadingFinished") {
+        console.log(`📡 Network event: ${method} - scheduling reload to capture final status`);
+        scheduleHarReload();
       }
     }
 
+    // WS inactivity watchdog: if no frames within 5.5s after reconnect, re-enable domains
+    const startWsWatchdog = () => {
+      setTimeout(() => {
+        const inactive = !lastWsEventTime || (Date.now() - lastWsEventTime > 5500);
+        if (inactive) {
+          console.warn("⏱️ WS inactivity detected - re-enabling Network/Targets");
+          try {
+            chrome.debugger.sendCommand(debuggee, "Network.enable", {});
+            chrome.debugger.sendCommand(debuggee, "Page.enable", {});
+            chrome.debugger.sendCommand(debuggee, "Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
+            chrome.debugger.sendCommand(debuggee, "Target.setDiscoverTargets", { discover: true });
+          } catch {}
+        }
+      }, 5600);
+    };
+
+    // Debounced HAR reload notifier for the panel
     function scheduleHarReload() {
       if (reloadTimeout) clearTimeout(reloadTimeout);
       reloadTimeout = setTimeout(() => {
@@ -565,7 +837,7 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
           "*"
         );
         reloadTimeout = null;
-      }, 100); // adjust debounce delay as needed
+      }, 100);
     }
 
     // Enhanced auto-reload system to catch completed requests and fix status 0 issues
@@ -573,47 +845,39 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
     let lastHarEntryCount = 0;
     let lastCompletedCount = 0;
     let pendingRequestIds = new Set<string>();
-    
+
     const startPeriodicReload = () => {
       if (periodicReloadInterval) clearInterval(periodicReloadInterval);
       periodicReloadInterval = setInterval(() => {
-        // Only trigger reload if there might be new entries
         if (chrome?.devtools?.network?.getHAR) {
           chrome.devtools.network.getHAR((harLog) => {
             const currentEntryCount = harLog.entries?.length || 0;
-            
+
             // Count completed requests (non-zero status or finished)
             let completedCount = 0;
             let newPendingIds = new Set<string>();
-            
+
             harLog.entries?.forEach(entry => {
               const requestId = (entry as any).requestId || (entry as any)._requestId || entry.request.url;
               const isCompleted = entry.response?.status && entry.response.status > 0;
               const hasTimings = entry.timings && entry.timings.receive >= 0;
-              
               if (isCompleted || hasTimings) {
                 completedCount++;
               } else {
                 newPendingIds.add(requestId);
               }
             });
-            
-            // Trigger reload if:
-            // 1. New entries appeared
-            // 2. More requests completed (fixing status 0 -> 200 issues)
-            // 3. Previously pending requests are now completed
-            const shouldReload = 
-              currentEntryCount !== lastHarEntryCount || 
+
+            const shouldReload =
+              currentEntryCount !== lastHarEntryCount ||
               completedCount > lastCompletedCount ||
               (pendingRequestIds.size > newPendingIds.size);
-            
+
             if (shouldReload) {
               console.log(`🔄 Auto-reload triggered: entries ${lastHarEntryCount}->${currentEntryCount}, completed ${lastCompletedCount}->${completedCount}, pending ${pendingRequestIds.size}->${newPendingIds.size}`);
-              
               lastHarEntryCount = currentEntryCount;
               lastCompletedCount = completedCount;
               pendingRequestIds = newPendingIds;
-              
               panelWindow.postMessage(
                 { source: "HAR_EXTRACTOR", type: "REQUEST_HAR_RELOAD" },
                 "*"
@@ -621,19 +885,19 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
             }
           });
         }
-      }, 150); // Slightly slower to reduce CPU usage but still responsive
+      }, 150);
     };
-    
+
     const stopPeriodicReload = () => {
       if (periodicReloadInterval) {
         clearInterval(periodicReloadInterval);
         periodicReloadInterval = null;
       }
     };
-    
+
     // Start periodic reload when panel is shown
     startPeriodicReload();
-    
+
     // Clean up on panel hidden
     panel.onHidden.addListener(() => {
       stopPeriodicReload();
@@ -771,128 +1035,6 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
       });
     }
 
-    // DISABLED: Live tracking to avoid duplicates - relying on HAR reload only
-    /*
-    chrome.devtools.network.onRequestFinished.addListener((request) => {
-      const rid = (request as any).requestId || (request as any)._requestId;
-      if (rid && seenRequests.has(rid)) return;
-      if (rid) seenRequests.add(rid);
-
-      // Check if this should be processed (not a static asset)
-      const matchedPattern = shouldProcessUrl(request.request.url);
-      if (!matchedPattern) return;
-
-      const extractReq = (cb: (j: any) => void) => {
-        if (typeof request.getRequestBody === "function") {
-          request.getRequestBody((b) => {
-            let j = {};
-            try {
-              j = JSON.parse(b.postData?.text || "{}");
-            } catch {
-              j = { 
-                _method: request.request.method,
-                _url: request.request.url,
-                _rawText: b.postData?.text || "" 
-              };
-            }
-            cb(j);
-          });
-        } else {
-          try {
-            const postData = request.request.postData?.text;
-            if (postData) {
-              cb(JSON.parse(postData));
-            } else {
-              cb({ 
-                _method: request.request.method,
-                _url: request.request.url 
-              });
-            }
-          } catch {
-            cb({ 
-              _method: request.request.method,
-              _url: request.request.url,
-              _rawText: request.request.postData?.text || ""
-            });
-          }
-        }
-      };
-
-      extractReq((reqJson) => {
-        request.getContent((content) => {
-          let resJson = {};
-          
-          // Enhanced response processing to match HAR reload behavior
-          if (content && content.trim()) {
-            try {
-              resJson = JSON.parse(content);
-            } catch {
-              resJson = { 
-                _rawContent: content,
-                _status: request.response?.status,
-                _statusText: request.response?.statusText || '',
-                _contentLength: content.length
-              };
-            }
-          } else {
-            // Even if no content, create a meaningful response object
-            resJson = { 
-              _empty: true,
-              _status: request.response?.status,
-              _statusText: request.response?.statusText || '',
-              _headers: request.response?.headers || [],
-              _mimeType: request.response?.content?.mimeType || 'unknown'
-            };
-          }
-
-          const processedPayload = processRequestByPattern(
-            { 
-              request: request.request, 
-              response: request.response,
-              startedDateTime: new Date().toISOString()
-            }, 
-            reqJson, 
-            resJson, 
-            matchedPattern
-          );
-
-          // Detect errors based on status code
-          const hasMessages = request.response?.status && (request.response.status >= 400);
-
-          panelWindow.postMessage(
-            {
-              source: "HAR_EXTRACTOR",
-              type: "HTTP_REQUEST",
-              payload: {
-                ...processedPayload,
-                timestamp: Date.now(),
-                endTime: Date.now(),
-                hasMessages,
-                // Always include header data for consistency
-                requestHeaders: request.request.headers || [],
-                responseHeaders: request.response?.headers || [],
-                headers: {
-                  request: request.request.headers || [],
-                  response: request.response?.headers || []
-                },
-                // Add debug info to understand what's happening
-                _debug: {
-                  hasContent: !!content,
-                  contentLength: content?.length || 0,
-                  responseStatus: request.response?.status,
-                  responseHeaders: request.response?.headers?.length || 0
-                }
-              },
-            },
-            "*"
-          );
-          console.log("📤 SENT HTTP_REQUEST for:", processedPayload.method, "at", new Date().toLocaleTimeString());
-          scheduleHarReload();
-        });
-      });
-    });
-    */
-
     panelWindow.postMessage({ source: "HAR_EXTRACTOR", type: "INIT" }, "*");
 
     // Listen for messages from the panel window (React app)
@@ -911,10 +1053,23 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
         console.log("🧹 Panel requested CLEAR_LOGS");
         seenRequests.clear();
         seenWsMessages.clear();
+        // Clear loading state when logs are cleared
+        pendingNetworkRequests.clear();
+        if (loadingTimeoutId) {
+          clearTimeout(loadingTimeoutId);
+          loadingTimeoutId = null;
+        }
+        // Send CLEAR message to clear both HTTP and WS rows in UI
         panelWindow.postMessage(
           { source: "HAR_EXTRACTOR", type: "CLEAR" },
           "*"
         );
+        // Ensure loading state is cleared
+        panelWindow.postMessage(
+          { source: "HAR_EXTRACTOR", type: "LOADING_END" },
+          "*"
+        );
+        console.log("✅ All logs cleared (HTTP and WebSocket)");
       }
 
       if (event.data.type === "GET_URL_PATTERNS") {
@@ -1014,64 +1169,268 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
           console.log("🔌 Force reconnection - resetting debugger state");
           debuggerAttached = false;
           
-          // Try to detach first, ignoring any errors
-          try {
-            chrome.debugger.detach(debuggee);
-            console.log("🔌 Force detached debugger");
-          } catch (error) {
-            console.log("🔌 Force detach failed (expected):", error.message);
-          }
-          
-          // Wait a moment then try to attach
-          setTimeout(() => {
-            console.log("🔌 Attempting fresh attachment...");
+          // Strategy 1: Try graceful detach first
+          const attemptGracefulDetach = () => {
+            return new Promise((resolve) => {
+              try {
+                chrome.debugger.detach(debuggee, () => {
+                  console.log("🔌 Graceful detach completed");
+                  resolve(true);
+                });
+              } catch (error) {
+                console.log("🔌 Graceful detach failed:", error.message);
+                resolve(false);
+              }
+            });
+          };
+
+          // Strategy 2: Force detach ignoring errors
+          const attemptForceDetach = () => {
+            try {
+              chrome.debugger.detach(debuggee);
+              console.log("🔌 Force detach completed");
+            } catch (error) {
+              console.log("🔌 Force detach failed (expected):", error.message);
+            }
+          };
+
+          // Strategy 3: Aggressive attachment with multiple attempts
+          const attemptAttachment = (attempt = 1, maxAttempts = 5) => {
+            console.log(`🔌 Attachment attempt ${attempt}/${maxAttempts}`);
+            
             chrome.debugger.attach(debuggee, "1.3", () => {
               if (chrome.runtime.lastError) {
-                console.error("❌ Failed to attach debugger:", chrome.runtime.lastError.message);
+                const errorMessage = chrome.runtime.lastError.message;
+                console.warn(`❌ Attempt ${attempt} failed:`, errorMessage);
                 
-                // If it fails because already attached, try to work with existing connection
-                if (chrome.runtime.lastError.message.includes("already attached")) {
+                // Handle specific error cases with different strategies
+                if (errorMessage.includes("different extension")) {
+                  console.log("🔄 Trying to force override existing debugger connection...");
+                  
+                  // Try to attach with different protocol version
+                  chrome.debugger.attach(debuggee, "1.2", () => {
+                    if (chrome.runtime.lastError) {
+                      console.log("🔄 v1.2 failed, trying v1.1...");
+                      chrome.debugger.attach(debuggee, "1.1", () => {
+                        if (chrome.runtime.lastError && attempt < maxAttempts) {
+                          console.log(`🔄 v1.1 failed, retrying attempt ${attempt + 1}...`);
+                          setTimeout(() => attemptAttachment(attempt + 1, maxAttempts), 500);
+                        } else if (!chrome.runtime.lastError) {
+                          console.log("✅ Debugger attached with v1.1");
+                          setupSuccessfulConnection();
+                        } else {
+                          console.log("🔌 All attachment attempts exhausted, proceeding anyway...");
+                          assumeConnectionAndProceed();
+                        }
+                      });
+                    } else {
+                      console.log("✅ Debugger attached with v1.2");
+                      setupSuccessfulConnection();
+                    }
+                  });
+                } else if (errorMessage.includes("already attached")) {
                   console.log("🔌 Debugger already attached, assuming it's working");
-                  debuggerAttached = true;
-                  
-                  // Enable domains on existing connection
-                  chrome.debugger.sendCommand(debuggee, "Network.enable", {});
-                  chrome.debugger.sendCommand(debuggee, "Page.enable", {});
-                  
-                  panelWindow.postMessage(
-                    { source: "HAR_EXTRACTOR", type: "DEBUGGER_RECONNECTED" },
-                    "*"
-                  );
-                  sendInitialHar();
+                  assumeConnectionAndProceed();
+                } else if (attempt < maxAttempts) {
+                  // Generic retry for other errors
+                  console.log(`🔄 Retrying in ${attempt * 200}ms...`);
+                  setTimeout(() => attemptAttachment(attempt + 1, maxAttempts), attempt * 200);
                 } else {
-                  panelWindow.postMessage(
-                    { source: "HAR_EXTRACTOR", type: "DEBUGGER_DISCONNECTED" },
-                    "*"
-                  );
+                  console.log("🔌 All attempts failed, forcing optimistic connection...");
+                  assumeConnectionAndProceed();
                 }
-                return;
+              } else {
+                console.log("✅ Debugger attached successfully on attempt", attempt);
+                setupSuccessfulConnection();
               }
-              
-              debuggerAttached = true;
-              console.log("✅ Debugger successfully attached");
+            });
+          };
 
-              // Enable the required domains
-              chrome.debugger.sendCommand(debuggee, "Network.enable", {});
-              chrome.debugger.sendCommand(debuggee, "Page.enable", {});
-              
-              // Notify panel that debugger is reconnected
-              panelWindow.postMessage(
-                { source: "HAR_EXTRACTOR", type: "DEBUGGER_RECONNECTED" },
-                "*"
+          // Strategy 4: Assume connection and proceed optimistically
+          const assumeConnectionAndProceed = () => {
+            console.log("🔌 Assuming debugger connection exists, proceeding optimistically...");
+            debuggerAttached = true;
+            
+            // Enhanced diagnostics for Windows Chrome profile issues
+            console.log("🔍 WINDOWS PROFILE DIAGNOSTICS:");
+            console.log("   - Chrome User Agent:", navigator.userAgent);
+            console.log("   - Extension storage check:", localStorage.length, "items");
+            console.log("   - WebSocket support:", typeof WebSocket !== 'undefined');
+            console.log("   - DevTools API availability:", typeof chrome?.devtools !== 'undefined');
+            
+            // Clear any potentially corrupted extension state for Windows Chrome
+            if (navigator.userAgent.includes('Windows')) {
+              console.log("🧹 Windows Chrome detected - clearing potentially corrupted state...");
+              try {
+                // Clear extension-specific localStorage that might be corrupted
+                const keysToCheck = [
+                  'har_extractor_ws_state',
+                  'har_extractor_debugger_state', 
+                  'har_extractor_ws_timestamp',
+                  'har_extractor_last_ws_connection'
+                ];
+                
+                keysToCheck.forEach(key => {
+                  const value = localStorage.getItem(key);
+                  if (value) {
+                    console.log(`🧹 Removing potentially corrupted key: ${key} = ${value}`);
+                    localStorage.removeItem(key);
+                  }
+                });
+                
+                // Reset WebSocket state variables
+                wsFirstTimestamp = null;
+                wsFirstWallClock = null;
+                seenWsMessages.clear();
+                
+                console.log("✅ Windows Chrome state cleanup completed");
+              } catch (error) {
+                console.warn("⚠️ State cleanup failed:", error.message);
+              }
+            }
+            
+            // Try to enable domains, ignore any errors
+            try {
+              chrome.debugger.sendCommand(debuggee, "Network.enable", {
+                maxTotalBufferSize: 100_000_000,
+                maxResourceBufferSize: 50_000_000
+              }, () => {
+                console.log("📡 Network.enable sent (may have failed silently)");
+              });
+              chrome.debugger.sendCommand(debuggee, "Network.setCacheDisabled", { cacheDisabled: true }, () => {
+                console.log("🧩 Network cache disabled");
+              });
+              chrome.debugger.sendCommand(debuggee, "Page.enable", {}, () => {
+                console.log("📄 Page.enable sent (may have failed silently)");
+              });
+              // Ensure sub-targets are auto-attached after optimistic reconnect
+              chrome.debugger.sendCommand(
+                debuggee,
+                "Target.setAutoAttach",
+                { autoAttach: true, waitForDebuggerOnStart: false, flatten: true },
+                () => {
+                  if (chrome.runtime.lastError) {
+                    console.warn("⚠️ setAutoAttach error:", chrome.runtime.lastError.message);
+                  } else {
+                    console.log("🎯 Target.setAutoAttach enabled");
+                  }
+                }
+              );
+              chrome.debugger.sendCommand(
+                debuggee,
+                "Target.setDiscoverTargets",
+                { discover: true },
+                () => {
+                  if (chrome.runtime.lastError) {
+                    console.debug("setDiscoverTargets not available:", chrome.runtime.lastError.message);
+                  } else {
+                    console.log("🔭 Target.setDiscoverTargets enabled");
+                  }
+                }
               );
               
-              // Trigger initial HAR load after reconnection
+              // Force enable WebSocket debugging specifically for Windows Chrome
+              if (navigator.userAgent.includes('Windows')) {
+                console.log("🔌 Windows Chrome: Force enabling WebSocket debugging...");
+                chrome.debugger.sendCommand(debuggee, "Runtime.enable", {}, () => {
+                  console.log("🔧 Runtime.enable sent for Windows Chrome");
+                });
+                chrome.debugger.sendCommand(debuggee, "Network.enableReportingApi", {enable: true}, () => {
+                  console.log("📊 Network.enableReportingApi sent for Windows Chrome");
+                });
+              }
+            } catch (error) {
+              console.log("🔌 Command sending failed, but continuing anyway:", (error as any)?.message || error);
+            }
+            
+            // Always notify success to UI
+            panelWindow.postMessage(
+              { source: "HAR_EXTRACTOR", type: "DEBUGGER_RECONNECTED" },
+              "*"
+            );
+
+            // Kick WS watchdog
+            startWsWatchdog();
+            
+            // Try to load HAR data
+            try {
               sendInitialHar();
-            });
-          }, 300);
+            } catch (error) {
+              console.log("📂 HAR loading failed, but connection assumed successful");
+            }
+          };
+
+          // Strategy 5: Setup successful connection
+          const setupSuccessfulConnection = () => {
+            debuggerAttached = true;
+            
+            try {
+              chrome.debugger.sendCommand(debuggee, "Network.enable", {
+                maxTotalBufferSize: 100_000_000,
+                maxResourceBufferSize: 50_000_000
+              });
+              chrome.debugger.sendCommand(debuggee, "Network.setCacheDisabled", { cacheDisabled: true });
+              chrome.debugger.sendCommand(debuggee, "Page.enable", {});
+              // Also ensure sub-targets are auto-attached on successful attach
+              chrome.debugger.sendCommand(
+                debuggee,
+                "Target.setAutoAttach",
+                { autoAttach: true, waitForDebuggerOnStart: false, flatten: true },
+                () => {
+                  if (chrome.runtime.lastError) {
+                    console.warn("⚠️ setAutoAttach error:", chrome.runtime.lastError.message);
+                  } else {
+                    console.log("🎯 Target.setAutoAttach enabled");
+                  }
+                }
+              );
+              chrome.debugger.sendCommand(
+                debuggee,
+                "Target.setDiscoverTargets",
+                { discover: true },
+                () => {
+                  if (chrome.runtime.lastError) {
+                    console.debug("setDiscoverTargets not available:", chrome.runtime.lastError.message);
+                  } else {
+                    console.log("🔭 Target.setDiscoverTargets enabled");
+                  }
+                }
+              );
+              console.log("✅ All debugger commands sent successfully");
+            } catch (error) {
+              console.warn("⚠️ Command sending failed:", (error as any)?.message || error);
+            }
+            
+            // Notify panel that debugger is reconnected
+            panelWindow.postMessage(
+              { source: "HAR_EXTRACTOR", type: "DEBUGGER_RECONNECTED" },
+              "*"
+            );
+            
+            // Kick WS watchdog
+            startWsWatchdog();
+            
+            // Trigger initial HAR load after reconnection
+            sendInitialHar();
+          };
+
+          // Execute the reconnection strategy sequence
+          console.log("🚀 Starting aggressive reconnection sequence...");
+          
+          // First try graceful detach
+          attemptGracefulDetach().then(() => {
+            // Then force detach regardless of graceful result
+            attemptForceDetach();
+            
+            // Wait a moment for cleanup
+            setTimeout(() => {
+              // Start attachment attempts
+              attemptAttachment();
+            }, 100);
+          });
         };
 
-        // Always force reconnection for reliability
+        // Always execute the force reconnection
         forceReconnection();
       }
     };

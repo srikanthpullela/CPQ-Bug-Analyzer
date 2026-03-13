@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { LoadingIndicator } from "./LoadingIndicator";
 
 export interface WsRow {
   time: string;
@@ -27,6 +28,8 @@ interface Props {
   onView: (rowKey: string, title: string, data: any) => void;
   isDarkMode?: boolean;
   headerTitle?: string;
+  isLoading?: boolean;
+  panelOpen?: boolean;
 }
 
 export const WsTableTab: React.FC<Props> = ({
@@ -37,6 +40,8 @@ export const WsTableTab: React.FC<Props> = ({
   onView,
   isDarkMode = false,
   headerTitle = "WebSocket Messages",
+  isLoading = false,
+  panelOpen = false,
 }) => {
   // Add state for minimizing/expanding the table
   const [isMinimized, setIsMinimized] = useState(false);
@@ -104,23 +109,23 @@ export const WsTableTab: React.FC<Props> = ({
   }
 
   const getDirectionBadgeClass = (direction?: string): string => {
-    if (!direction) return isDarkMode ? 'bg-gray-700 text-gray-300' : 'bg-gray-100 text-gray-600';
+    if (!direction) return isDarkMode ? 'bg-gray-800/20 text-gray-400 border-gray-600' : 'bg-gray-50/50 text-gray-500 border-gray-300';
     
     switch (direction.toLowerCase()) {
       case 'sent':
         return isDarkMode 
-          ? 'bg-blue-800 text-blue-200 border-blue-600' 
-          : 'bg-blue-100 text-blue-800 border-blue-200';
+          ? 'bg-blue-900/20 text-blue-300 border-blue-600' 
+          : 'bg-blue-50/50 text-blue-700 border-blue-300';
       case 'received':
         return isDarkMode 
-          ? 'bg-green-800 text-green-200 border-green-600' 
-          : 'bg-green-100 text-green-800 border-green-200';
+          ? 'bg-green-900/20 text-green-300 border-green-600' 
+          : 'bg-green-50/50 text-green-700 border-green-300';
       case 'connection':
         return isDarkMode 
-          ? 'bg-purple-800 text-purple-200 border-purple-600' 
-          : 'bg-purple-100 text-purple-800 border-purple-200';
+          ? 'bg-purple-900/20 text-purple-300 border-purple-600' 
+          : 'bg-purple-50/50 text-purple-700 border-purple-300';
       default:
-        return isDarkMode ? 'bg-gray-700 text-gray-300' : 'bg-gray-100 text-gray-600';
+        return isDarkMode ? 'bg-gray-800/20 text-gray-400 border-gray-600' : 'bg-gray-50/50 text-gray-500 border-gray-300';
     }
   };
 
@@ -131,7 +136,7 @@ export const WsTableTab: React.FC<Props> = ({
       }`}
     >
       <h3
-        className={`p-2 font-semibold transition-colors duration-200 ${
+        className={`px-2 py-1 text-xs font-semibold transition-colors duration-200 ${
           isDarkMode
             ? "bg-gray-700 text-gray-100 border-b border-gray-600"
             : "bg-gray-100 text-gray-800 border-b border-gray-200"
@@ -161,26 +166,26 @@ export const WsTableTab: React.FC<Props> = ({
         </div>
       </h3>
 
-      {/* Connection URL display - only show when not minimized */}
-      {!isMinimized && (
-      <div className="flex items-center gap-2">
-        <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
+      {/* Connection URL display - only show when not minimized and URL is available */}
+      {!isMinimized && (baseUrl || rows.length > 0) && (
+      <div className="flex items-center gap-1.5 px-2 py-0.5">
+        <span className="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span>
         <span
-          className={`text-xs font-medium transition-colors duration-200 ${
+          className={`text-[11px] font-medium transition-colors duration-200 ${
             isDarkMode ? "text-green-300" : "text-green-800"
           }`}
         >
           Connected:
         </span>
         <code
-          className={`text-xs px-2 py-1 rounded font-mono transition-colors duration-200 max-w-none ${
+          className={`text-[11px] px-1 py-0 rounded font-mono transition-colors duration-200 truncate ${
             isDarkMode
               ? "text-green-200 bg-green-800/30 border border-green-700"
               : "text-green-700 bg-green-100 border border-green-200"
           }`}
-          title={baseUrl}
+          title={baseUrl || rows[0]?.endpoint || ''}
         >
-          {baseUrl}
+          {baseUrl || rows[0]?.endpoint || 'WebSocket'}
         </code>
       </div>
       )}
@@ -195,54 +200,49 @@ export const WsTableTab: React.FC<Props> = ({
         >
           <tr>
             <th
-              className={`px-3 py-1 text-left text-sm font-medium transition-colors duration-200 ${
+              className={`px-2 py-0.5 text-left text-xs font-medium transition-colors duration-200 ${
                 isDarkMode ? "text-gray-200" : "text-gray-700"
               }`}
             >
               #
             </th>
             <th
-              className={`px-3 py-1 text-left text-sm font-medium transition-colors duration-200 ${
+              className={`px-2 py-0.5 text-left text-xs font-medium transition-colors duration-200 ${
                 isDarkMode ? "text-gray-200" : "text-gray-700"
               }`}
             >
               Time
             </th>
             <th
-              className={`px-3 py-1 text-left text-sm font-medium transition-colors duration-200 ${
+              className={`px-2 py-0.5 text-left text-xs font-medium transition-colors duration-200 ${
                 isDarkMode ? "text-gray-200" : "text-gray-700"
               }`}
             >
               Endpoint
             </th>
             <th
-              className={`px-3 py-1 text-left text-sm font-medium transition-colors duration-200 ${
+              className={`px-2 py-0.5 text-left text-xs font-medium transition-colors duration-200 ${
                 isDarkMode ? "text-gray-200" : "text-gray-700"
               }`}
             >
               Action
             </th>
             <th
-              className={`px-3 py-1 text-left text-sm font-medium transition-colors duration-200 ${
+              className={`px-2 py-0.5 text-left text-xs font-medium transition-colors duration-200 ${
                 isDarkMode ? "text-gray-200" : "text-gray-700"
               }`}
             >
               Direction
             </th>
-            <th
-              className={`px-3 py-1 text-left text-sm font-medium transition-colors duration-200 ${
-                isDarkMode ? "text-gray-200" : "text-gray-700"
-              }`}
-            >
-              Status
-            </th>
-            <th
-              className={`px-3 py-1 text-left text-sm font-medium transition-colors duration-200 ${
-                isDarkMode ? "text-gray-200" : "text-gray-700"
-              }`}
-            >
-              Actions
-            </th>
+            {!panelOpen && (
+              <th
+                className={`px-2 py-0.5 text-left text-xs font-medium transition-colors duration-200 ${
+                  isDarkMode ? "text-gray-200" : "text-gray-700"
+                }`}
+              >
+                Status
+              </th>
+            )}
           </tr>
         </thead>
         <tbody>
@@ -261,7 +261,9 @@ export const WsTableTab: React.FC<Props> = ({
             return (
               <tr
                 key={w.id || i}
-                className={`transition-colors duration-200 cursor-pointer ${
+                className={`transition-colors duration-200 cursor-pointer hover:${
+                  isDarkMode ? "bg-gray-700" : "bg-blue-50"
+                } ${
                   selectedRowKey === `ws-${i}`
                     ? isDarkMode
                       ? "bg-blue-800 border-blue-600"
@@ -273,15 +275,37 @@ export const WsTableTab: React.FC<Props> = ({
                     : rowColor ||
                       (i % 2 === 0
                         ? isDarkMode
-                          ? "bg-gray-800 hover:bg-gray-600"
-                          : "bg-white hover:bg-gray-50"
+                          ? "bg-gray-800"
+                          : "bg-white"
                         : isDarkMode
-                        ? "bg-gray-900 hover:bg-gray-600"
-                        : "bg-gray-50 hover:bg-gray-100")
+                        ? "bg-gray-900"
+                        : "bg-gray-50")
                 }`}
+                onClick={() => {
+                  onView(
+                    `ws-${i}`,
+                    w.action || w.endpoint || 'WebSocket',
+                    {
+                      _rowType: 'ws',
+                      endpoint: w.endpoint,
+                      action: w.action,
+                      status: w.status,
+                      time: w.time,
+                      direction: w.direction,
+                      payload: w.payload,
+                      headers: {
+                        connectionHeaders: w.connectionHeaders || w.headers?.request || [],
+                        responseHeaders: w.responseHeaders || w.headers?.response || [],
+                        url: w.endpoint || baseUrl,
+                        method: 'WebSocket',
+                        status: w.status,
+                      },
+                    }
+                  );
+                }}
               >
                 <td
-                  className={`px-3 py-1 text-sm transition-colors duration-200 ${
+                  className={`px-2 py-0.5 text-xs transition-colors duration-200 ${
                     isDarkMode ? "text-gray-200" : "text-gray-700"
                   }`}
                 >
@@ -289,7 +313,7 @@ export const WsTableTab: React.FC<Props> = ({
                 </td>
 
                 <td
-                  className={`px-3 py-1 text-sm transition-colors duration-200 ${
+                  className={`px-2 py-0.5 text-xs transition-colors duration-200 ${
                     isDarkMode ? "text-gray-200" : "text-gray-700"
                   }`}
                 >
@@ -297,7 +321,7 @@ export const WsTableTab: React.FC<Props> = ({
                 </td>
 
                 <td
-                  className={`px-3 py-1 text-sm break-all transition-colors duration-200 ${
+                  className={`px-2 py-0.5 text-xs break-all transition-colors duration-200 ${
                     isDarkMode ? "text-gray-200" : "text-gray-700"
                   }`}
                 >
@@ -307,7 +331,7 @@ export const WsTableTab: React.FC<Props> = ({
                 </td>
 
                 <td
-                  className={`px-3 py-1 text-sm transition-colors duration-200 uppercase ${
+                  className={`px-2 py-0.5 text-xs transition-colors duration-200 uppercase ${
                     isDarkMode ? "text-gray-200" : "text-gray-700"
                   }`}
                 >
@@ -315,13 +339,13 @@ export const WsTableTab: React.FC<Props> = ({
                 </td>
 
                 <td
-                  className={`px-3 py-1 text-sm transition-colors duration-200 ${
+                  className={`px-2 py-0.5 text-xs transition-colors duration-200 ${
                     isDarkMode ? "text-gray-200" : "text-gray-700"
                   }`}
                 >
                   {w.direction && (
                     <span
-                      className={`inline-block px-2 py-1 text-xs font-medium rounded border ${getDirectionBadgeClass(
+                      className={`inline-block px-1.5 py-0 text-[11px] font-medium rounded border opacity-75 ${getDirectionBadgeClass(
                         w.direction
                       )}`}
                       title={`Message direction: ${w.direction}`}
@@ -331,25 +355,26 @@ export const WsTableTab: React.FC<Props> = ({
                   )}
                 </td>
 
+                {!panelOpen && (
                 <td
-                  className={`px-3 py-1 text-sm transition-colors duration-200 uppercase ${
+                  className={`px-2 py-0.5 text-xs transition-colors duration-200 uppercase ${
                     isDarkMode ? "text-gray-200" : "text-gray-700"
                   }`}
                 >
                   {w.status !== null && w.status !== undefined ? (
                     <span
-                      className={`inline-block px-2 py-1 text-xs font-medium rounded ${
+                      className={`inline-block px-1.5 py-0 text-[11px] font-medium rounded opacity-70 ${
                         w.status >= 4000
                           ? isDarkMode
-                            ? "bg-red-800 text-red-200"
-                            : "bg-red-100 text-red-800"
+                            ? "bg-red-900/20 text-red-300 border border-red-600"
+                            : "bg-red-50/50 text-red-700 border border-red-300"
                           : w.status >= 1000
                           ? isDarkMode
-                            ? "bg-yellow-800 text-yellow-200"
-                            : "bg-yellow-100 text-yellow-800"
+                            ? "bg-yellow-900/20 text-yellow-300 border border-yellow-600"
+                            : "bg-yellow-50/50 text-yellow-700 border border-yellow-300"
                           : isDarkMode
-                          ? "bg-green-800 text-green-200"
-                          : "bg-green-100 text-green-800"
+                          ? "bg-green-900/20 text-green-300 border border-green-600"
+                          : "bg-green-50/50 text-green-700 border border-green-300"
                       }`}
                       title={`WebSocket status: ${w.status}`}
                     >
@@ -363,69 +388,7 @@ export const WsTableTab: React.FC<Props> = ({
                     </span>
                   )}
                 </td>
-
-                <td
-                  className={`px-3 py-1 space-x-1 flex transition-colors duration-200`}
-                >
-                  <button
-                    className={`px-2 py-0.5 text-xs font-medium text-white rounded transition-colors duration-200 ${
-                      isDarkMode
-                        ? "bg-indigo-600 hover:bg-indigo-500"
-                        : "bg-indigo-500 hover:bg-indigo-600"
-                    }`}
-                    onClick={() =>
-                      onView(
-                        `ws-${i}`,
-                        `WS ▶ ${w.action || "Message"}`,
-                        w.payload
-                      )
-                    }
-                  >
-                    View
-                  </button>
-
-                  {/* Show Headers button if we have connection headers */}
-                  {(w.headers || w.connectionHeaders || w.requestHeaders) && (
-                    <button
-                      className={`px-2 py-0.5 text-xs font-medium text-white rounded transition-colors duration-200 ${
-                        isDarkMode
-                          ? "bg-purple-700 hover:bg-purple-600"
-                          : "bg-purple-600 hover:bg-purple-700"
-                      }`}
-                      onClick={() =>
-                        onView(`ws-${i}`, `WS ▶ Headers`, {
-                          connectionHeaders:
-                            w.connectionHeaders || w.headers?.request || [],
-                          responseHeaders:
-                            w.responseHeaders || w.headers?.response || [],
-                          url: w.endpoint || baseUrl,
-                          method: "WebSocket",
-                          status: w.status,
-                          _info: {
-                            hasConnectionHeaders:
-                              (w.connectionHeaders?.length ||
-                                w.headers?.request?.length ||
-                                0) > 0,
-                            hasResponseHeaders:
-                              (w.responseHeaders?.length ||
-                                w.headers?.response?.length ||
-                                0) > 0,
-                            connectionHeaderCount:
-                              w.connectionHeaders?.length ||
-                              w.headers?.request?.length ||
-                              0,
-                            responseHeaderCount:
-                              w.responseHeaders?.length ||
-                              w.headers?.response?.length ||
-                              0,
-                          },
-                        })
-                      }
-                    >
-                      Headers
-                    </button>
-                  )}
-                </td>
+                )}
               </tr>
             );
           })}
@@ -434,7 +397,7 @@ export const WsTableTab: React.FC<Props> = ({
           {filtered.length === 0 && (
             <tr>
               <td
-                colSpan={7}
+                colSpan={panelOpen ? 6 : 7}
                 className={`text-center py-4 transition-colors duration-200 ${
                   isDarkMode ? "text-gray-400" : "text-gray-500"
                 }`}
@@ -445,6 +408,14 @@ export const WsTableTab: React.FC<Props> = ({
           )}
         </tbody>
       </table>
+      )}
+      
+      {/* Loading indicator when WebSocket messages are being captured */}
+      {isLoading && !isMinimized && (
+        <LoadingIndicator 
+          isDarkMode={isDarkMode}
+          message="Capturing WebSocket messages..."
+        />
       )}
     </div>
   );

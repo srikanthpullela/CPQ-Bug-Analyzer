@@ -1,5 +1,6 @@
 // src/components/HttpTableTab.tsx
 import React, { useState } from "react";
+import { LoadingIndicator } from "./LoadingIndicator";
 
 export interface HttpRow {
   method: string;
@@ -33,6 +34,8 @@ interface Props {
   onView: (rowKey: string, title: string, data: any) => void;
   isDarkMode?: boolean;
   headerTitle?: string;
+  isLoading?: boolean;
+  panelOpen?: boolean;
 }
 
 export const HttpTableTab: React.FC<Props> = ({
@@ -42,9 +45,9 @@ export const HttpTableTab: React.FC<Props> = ({
   onView,
   isDarkMode = false,
   headerTitle = "API Methods",
+  isLoading = false,
+  panelOpen = false,
 }) => {
-  // Add state for showing headers buttons
-  const [showHeadersButtons, setShowHeadersButtons] = useState(false);
   // Add state for minimizing/expanding the table
   const [isMinimized, setIsMinimized] = useState(false);
 
@@ -264,24 +267,24 @@ export const HttpTableTab: React.FC<Props> = ({
 
   // Add function to get status badge styling
   const getStatusBadgeClass = (status: number | null): string => {
-    if (status === null) return isDarkMode ? 'bg-gray-700 text-gray-300' : 'bg-gray-100 text-gray-600';
+    if (status === null) return isDarkMode ? 'bg-gray-800/20 text-gray-400 border-gray-600' : 'bg-gray-50/50 text-gray-500 border-gray-300';
     
     if (status >= 200 && status < 300) {
       return isDarkMode 
-        ? 'bg-green-800 text-green-200 border-green-600' 
-        : 'bg-green-100 text-green-800 border-green-200';
+        ? 'bg-green-900/20 text-green-300 border-green-600' 
+        : 'bg-green-50/50 text-green-700 border-green-300';
     } else if (status >= 300 && status < 400) {
       return isDarkMode 
-        ? 'bg-yellow-800 text-yellow-200 border-yellow-600' 
-        : 'bg-yellow-100 text-yellow-800 border-yellow-200';
+        ? 'bg-yellow-900/20 text-yellow-300 border-yellow-600' 
+        : 'bg-yellow-50/50 text-yellow-700 border-yellow-300';
     } else if (status >= 400 && status < 500) {
       return isDarkMode 
-        ? 'border-orange-600' 
-        : 'border-orange-200';
+        ? 'bg-orange-900/20 text-orange-300 border-orange-600' 
+        : 'bg-orange-50/50 text-orange-700 border-orange-300';
     } else if (status >= 500) {
       return isDarkMode 
-        ? 'bg-red-800 text-red-200 border-red-600' 
-        : 'bg-red-100 text-red-800 border-red-200';
+        ? 'bg-red-900/20 text-red-300 border-red-600' 
+        : 'bg-red-50/50 text-red-700 border-red-300';
     }
     
     return isDarkMode ? 'bg-gray-700 text-gray-300 border-gray-600' : 'bg-gray-100 text-gray-600 border-gray-200';
@@ -300,17 +303,7 @@ export const HttpTableTab: React.FC<Props> = ({
   };
 
   const getStatusInlineStyle = (status: number | null): React.CSSProperties => {
-    if (status !== null && status >= 400 && status < 500) {
-      return isDarkMode ? {
-        backgroundColor: '#9a3412', // orange-800
-        color: '#fed7aa', // orange-100
-        borderColor: '#ea580c', // orange-600
-      } : {
-        backgroundColor: '#fed7aa', // orange-100
-        color: '#9a3412', // orange-800
-        borderColor: '#fdba74', // orange-200
-      };
-    }
+    // No longer needed as we're using subtle backgrounds via Tailwind classes
     return {};
   };
 
@@ -339,7 +332,7 @@ export const HttpTableTab: React.FC<Props> = ({
     }`}>
       {/* Add hidden safelist classes to ensure Tailwind includes them */}
       <div className="hidden bg-orange-100 text-orange-800 border-orange-200 bg-orange-900 text-orange-200 border-orange-600"></div>
-      <h3 className={`p-2 font-semibold transition-colors duration-200 ${
+      <h3 className={`px-2 py-1 text-xs font-semibold transition-colors duration-200 ${
         isDarkMode 
           ? "bg-gray-700 text-gray-100 border-b border-gray-600" 
           : "bg-gray-100 text-gray-800 border-b border-gray-200"
@@ -375,67 +368,40 @@ export const HttpTableTab: React.FC<Props> = ({
           isDarkMode ? "bg-gray-700" : "bg-gray-50"
         }`}>
           <tr>
-            <th className={`px-3 py-1 text-left text-sm font-medium transition-colors duration-200 ${
+            <th className={`px-2 py-0.5 text-left text-xs font-medium transition-colors duration-200 ${
               isDarkMode 
                 ? "text-gray-200" 
                 : "text-gray-700"
             }`}>#</th>
-            <th className={`px-3 py-1 text-left text-sm font-medium transition-colors duration-200 ${
+            <th className={`px-2 py-0.5 text-left text-xs font-medium transition-colors duration-200 ${
               isDarkMode 
                 ? "text-gray-200" 
                 : "text-gray-700"
             }`}>Time</th>
-            <th className={`px-3 py-1 text-left text-sm font-medium transition-colors duration-200 ${
+            <th className={`px-2 py-0.5 text-left text-xs font-medium transition-colors duration-200 ${
               isDarkMode 
                 ? "text-gray-200" 
                 : "text-gray-700"
             }`}>Method</th>
-            <th className={`px-3 py-1 text-left text-sm font-medium transition-colors duration-200 ${
-              isDarkMode 
-                ? "text-gray-200" 
-                : "text-gray-700"
-            }`}>Type</th>
-            <th className={`px-3 py-1 text-left text-sm font-medium transition-colors duration-200 ${
-              isDarkMode 
-                ? "text-gray-200" 
-                : "text-gray-700"
-            }`}>Status</th>
-            {/* <th className={`px-3 py-1 text-left text-sm font-medium transition-colors duration-200 ${
-              isDarkMode 
-                ? "text-gray-200" 
-                : "text-gray-700"
-            }`}>Duration</th> */}
-            <th className={`px-3 py-1 text-left text-sm font-medium transition-colors duration-200 ${
-              isDarkMode 
-                ? "text-gray-200" 
-                : "text-gray-700"
-            }`}>
-              <div className="flex items-center justify-between">
-                <span>Actions</span>
-                <label className="flex items-center cursor-pointer ml-2">
-                  <input
-                    type="checkbox"
-                    checked={showHeadersButtons}
-                    onChange={(e) => setShowHeadersButtons(e.target.checked)}
-                    className={`w-3 h-3 text-indigo-600 border-gray-300 focus:ring-indigo-500 focus:ring-1 rounded ${
-                      isDarkMode ? "bg-gray-600" : "bg-gray-100"
-                    }`}
-                  />
-                  <span className={`ml-1 text-xs transition-colors duration-200 ${
-                    isDarkMode ? "text-gray-300" : "text-gray-600"
-                  }`}>
-                    Headers
-                  </span>
-                </label>
-              </div>
-            </th>
+            {!panelOpen && (
+              <>
+                <th className={`px-2 py-0.5 text-left text-xs font-medium transition-colors duration-200 ${
+                  isDarkMode ? "text-gray-200" : "text-gray-700"
+                }`}>Type</th>
+                <th className={`px-2 py-0.5 text-left text-xs font-medium transition-colors duration-200 ${
+                  isDarkMode ? "text-gray-200" : "text-gray-700"
+                }`}>Status</th>
+              </>
+            )}
           </tr>
         </thead>
         <tbody>
           {displayRows.map((gr, i) => (
             <tr
               key={gr.id || i}
-              className={`transition-colors duration-200 cursor-pointer ${
+              className={`transition-colors duration-200 cursor-pointer hover:${
+                isDarkMode ? "bg-gray-700" : "bg-blue-50"
+              } ${
                 selectedRowKey === `http-${i}` 
                   ? isDarkMode 
                     ? "bg-blue-800 border-blue-600" 
@@ -447,25 +413,48 @@ export const HttpTableTab: React.FC<Props> = ({
                   : getRowColorClass(gr) ||
                     (i % 2 === 0 
                       ? isDarkMode 
-                        ? "bg-gray-800 hover:bg-gray-600" 
-                        : "bg-white hover:bg-gray-50"
+                        ? "bg-gray-800" 
+                        : "bg-white"
                       : isDarkMode 
-                        ? "bg-gray-900 hover:bg-gray-600" 
-                        : "bg-gray-50 hover:bg-gray-100")
+                        ? "bg-gray-900" 
+                        : "bg-gray-50")
               }`}
               style={getRowInlineStyle(gr)}
+              onClick={() => {
+                onView(
+                  `http-${i}`,
+                  gr.patternType === 'http' ? gr.endpoint || gr.method : gr.method,
+                  {
+                    _rowType: 'http',
+                    method: gr.method,
+                    time: gr.time,
+                    status: gr.status,
+                    patternType: gr.patternType,
+                    httpMethod: gr.httpMethod,
+                    endpoint: gr.endpoint,
+                    urlPattern: gr.urlPattern,
+                    displayName: gr.displayName,
+                    hasMessages: gr.hasMessages,
+                    startTime: gr.startTime,
+                    endTime: gr.endTime,
+                    requestPayload: gr.lastRequestPayload,
+                    responsePayload: gr.lastResponsePayload,
+                    headers: gr.lastHeaders,
+                  }
+                );
+              }}
             >
-              <td className={`px-3 py-1 text-sm transition-colors duration-200 ${
+              <td className={`px-2 py-0.5 text-xs transition-colors duration-200 ${
                 isDarkMode 
                   ? "text-gray-200" 
                   : "text-gray-700"
               }`}>{i + 1}</td>
-              <td className={`px-3 py-1 text-sm transition-colors duration-200 ${
+              <td className={`px-2 py-0.5 text-xs transition-colors duration-200 ${
                 isDarkMode 
                   ? "text-gray-200" 
                   : "text-gray-700"
               }`}>{gr.time}</td>
-              <td className={`px-3 py-1 text-sm method-td transition-colors duration-200 ${
+              <td className={`px-2 py-0.5 text-xs method-td transition-colors duration-200 ${
                 isDarkMode 
                   ? "text-gray-200" 
                   : "text-gray-700"
@@ -474,99 +463,56 @@ export const HttpTableTab: React.FC<Props> = ({
                   {gr.patternType === 'http' ? gr.endpoint || gr.method : gr.method}
                 </div>
               </td>
-              <td className={`px-3 py-1 text-sm transition-colors duration-200 ${
-                isDarkMode 
-                  ? "text-gray-200" 
-                  : "text-gray-700"
-              }`}>
-                <span className={`px-2 py-0.5 text-xs rounded font-medium ${
-                  gr.patternType === 'apex'
-                    ? isDarkMode 
-                      ? "bg-purple-800 text-purple-200" 
-                      : "bg-purple-100 text-purple-800"
-                    : gr.patternType === 'http'
-                    ? isDarkMode 
-                      ? "bg-green-800 text-green-200" 
-                      : "bg-green-100 text-green-800"
-                    : isDarkMode 
-                      ? "bg-gray-700 text-gray-200" 
-                      : "bg-gray-100 text-gray-700"
-                }`} title={gr.patternType === 'http' ? `${gr.httpMethod || 'HTTP'} - ${gr.urlPattern || 'HTTP API'}` : gr.urlPattern || 'Unknown'}>
-                  {gr.patternType === 'http' ? gr.httpMethod || 'HTTP' : gr.urlPattern || 'Unknown'}
-                </span>
-              </td>
-              <td className={`px-3 py-1 text-sm transition-colors duration-200 ${
-                isDarkMode 
-                  ? "text-gray-200" 
-                  : "text-gray-700"
-              }`}>
-                {gr.status !== null ? (
-                  <span
-                    className={`inline-block px-2 py-1 text-xs font-medium rounded border ${getStatusBadgeClass(gr.status)}`}
-                    style={getStatusInlineStyle(gr.status)}
-                    title={`${gr.status} - ${getStatusText(gr.status)}`}
-                  >
-                    {gr.status}
-                  </span>
-                ) : (
-                  <span className={isDarkMode ? "text-gray-400" : "text-gray-400"}>–</span>
-                )}
-              </td>
-              {/* <td className={`px-3 py-1 text-sm transition-colors duration-200 ${
-                isDarkMode 
-                  ? "text-gray-200" 
-                  : "text-gray-700"
-              }`}>
-                {gr.startTime && gr.endTime
-                  ? `${((gr.endTime - gr.startTime) / 1000).toFixed(2)}s`
-                  : "–"}
-              </td> */}
-              <td className={`px-3 py-1 space-x-1 flex transition-colors duration-200`}>
-                {Array.from(gr.actions).map((action) => {
-                  // Only show Headers button if checkbox is checked
-                  if (action === "Headers" && !showHeadersButtons) {
-                    return null;
-                  }
-                  
-                  return (
-                    <button
-                      key={action}
-                      className={`px-2 py-0.5 text-xs font-medium text-white rounded transition-colors duration-200 ${
-                        action === "Request" 
-                          ? isDarkMode 
-                            ? "bg-indigo-600 hover:bg-indigo-500" 
-                            : "bg-indigo-500 hover:bg-indigo-600"
-                          : action === "Response"
-                          ? isDarkMode 
-                            ? "bg-indigo-800 hover:bg-indigo-700" 
-                            : "bg-indigo-700 hover:bg-indigo-800"
-                          : isDarkMode 
-                            ? "bg-purple-700 hover:bg-purple-600" 
-                            : "bg-purple-600 hover:bg-purple-700"
-                      }`}
-                      onClick={() => {
-                        const dataToPass = action === "Request"
-                          ? gr.lastRequestPayload
-                          : action === "Response"
-                          ? gr.lastResponsePayload
-                          : gr.lastHeaders;
-                        
-                        onView(
-                          `http-${i}`,
-                          `${gr.method} ▶ ${action}`,
-                          dataToPass
-                        );
-                      }}
-                    >
-                      {action}
-                    </button>
-                  );
-                })}
-              </td>
+              {!panelOpen && (
+                <>
+                  <td className={`px-2 py-0.5 text-xs transition-colors duration-200 ${
+                    isDarkMode ? "text-gray-200" : "text-gray-700"
+                  }`}>
+                    <span className={`px-1.5 py-0 text-[11px] rounded font-medium border opacity-75 ${
+                      gr.patternType === 'apex'
+                        ? isDarkMode 
+                          ? "border-purple-600 text-purple-300 bg-purple-900/20" 
+                          : "border-purple-300 text-purple-700 bg-purple-50/50"
+                        : gr.patternType === 'http'
+                        ? isDarkMode 
+                          ? "border-green-600 text-green-300 bg-green-900/20" 
+                          : "border-green-300 text-green-700 bg-green-50/50"
+                        : isDarkMode 
+                          ? "border-gray-600 text-gray-300 bg-gray-800/20" 
+                          : "border-gray-300 text-gray-600 bg-gray-50/50"
+                    }`} title={gr.patternType === 'http' ? `${gr.httpMethod || 'HTTP'} - ${gr.urlPattern || 'HTTP API'}` : gr.urlPattern || 'Unknown'}>
+                      {gr.patternType === 'http' ? gr.httpMethod || 'HTTP' : gr.urlPattern || 'Unknown'}
+                    </span>
+                  </td>
+                  <td className={`px-2 py-0.5 text-xs transition-colors duration-200 ${
+                    isDarkMode ? "text-gray-200" : "text-gray-700"
+                  }`}>
+                    {gr.status !== null ? (
+                      <span
+                        className={`inline-block px-1.5 py-0 text-[11px] font-medium rounded border opacity-70 ${getStatusBadgeClass(gr.status)}`}
+                        title={`${gr.status} - ${getStatusText(gr.status)}`}
+                      >
+                        {gr.status}
+                      </span>
+                    ) : (
+                      <span className={isDarkMode ? "text-gray-400" : "text-gray-400"}>–</span>
+                    )}
+                  </td>
+                </>
+              )}
+
             </tr>
             ))}
         </tbody>
       </table>
+      )}
+      
+      {/* Loading indicator when network calls are in progress */}
+      {isLoading && !isMinimized && (
+        <LoadingIndicator 
+          isDarkMode={isDarkMode}
+          message="Capturing HTTP requests..."
+        />
       )}
     </div>
   );

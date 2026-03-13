@@ -7,6 +7,7 @@ interface ResizablePanelsProps {
   minLeftWidth?: number; // percentage
   maxLeftWidth?: number; // percentage
   isDarkMode?: boolean;
+  showRightPanel?: boolean;
 }
 
 export const ResizablePanels: React.FC<ResizablePanelsProps> = ({
@@ -16,6 +17,7 @@ export const ResizablePanels: React.FC<ResizablePanelsProps> = ({
   minLeftWidth = 20,
   maxLeftWidth = 80,
   isDarkMode = false,
+  showRightPanel = true,
 }) => {
   const [leftWidth, setLeftWidth] = useState(() => {
     if (typeof window !== "undefined") {
@@ -25,6 +27,13 @@ export const ResizablePanels: React.FC<ResizablePanelsProps> = ({
     return defaultLeftWidth;
   });
   const [isDragging, setIsDragging] = useState(false);
+
+  // When right panel visibility changes, adjust left width accordingly
+  useEffect(() => {
+    if (showRightPanel) {
+      setLeftWidth(defaultLeftWidth);
+    }
+  }, [showRightPanel, defaultLeftWidth]);
 
   // Save to localStorage when width changes
   useEffect(() => {
@@ -104,6 +113,17 @@ export const ResizablePanels: React.FC<ResizablePanelsProps> = ({
   }, [isDragging, handleMouseMove, handleMouseUp]);
 
   const rightWidth = 100 - leftWidth;
+
+  // When right panel is hidden, left takes full width
+  if (!showRightPanel) {
+    return (
+      <div id="resizable-container" className="flex h-full w-full relative">
+        <div className={`w-full overflow-auto transition-colors duration-200 ${isDarkMode ? "border-gray-700" : "border-gray-200"}`}>
+          {leftPanel}
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div id="resizable-container" className="flex h-full w-full relative">

@@ -36,6 +36,8 @@ interface NetworkTablesProps {
   isDarkMode: boolean;
   requestHarReload: () => void;
   onView: (rowKey: string, title: string, data: any) => void;
+  isLoading?: boolean;
+  panelOpen?: boolean;
 }
 
 export const NetworkTables: React.FC<NetworkTablesProps> = ({
@@ -47,6 +49,8 @@ export const NetworkTables: React.FC<NetworkTablesProps> = ({
   isDarkMode,
   requestHarReload,
   onView,
+  isLoading = false,
+  panelOpen = false,
 }) => {
   // Create a utility function for consistent filtering
   const createFilterFunction = (searchTerm: string) => {
@@ -168,6 +172,8 @@ export const NetworkTables: React.FC<NetworkTablesProps> = ({
         onView={onView}
         isDarkMode={isDarkMode}
         headerTitle={`HTTP Requests (${filteredHttpRows.length}/${httpRows.length})`}
+        isLoading={isLoading}
+        panelOpen={panelOpen}
       />
 
       {/* WebSocket Table */}
@@ -180,6 +186,8 @@ export const NetworkTables: React.FC<NetworkTablesProps> = ({
           onView={onView}
           isDarkMode={isDarkMode}
           headerTitle={`WebSocket Messages (${filteredWsRows.length}/${wsRows.length})`}
+          isLoading={isLoading}
+          panelOpen={panelOpen}
         />
       )}
     </div>

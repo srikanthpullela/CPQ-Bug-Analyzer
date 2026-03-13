@@ -23,13 +23,12 @@ import { useEditModal } from "../hooks/useEditModal";
 import { ClearLogsConfirmationModal } from "./components/ClearLogsConfirmationModal";
 
 const HarMethodsTabPage: React.FC = () => {
-  const { httpRows, wsRows, wsBaseUrl } = useLiveHar();
+  const { httpRows, wsRows, wsBaseUrl, isLoading } = useLiveHar();
   const { buildHistory } = useFieldHistory(httpRows, wsRows);
   const [searchTerm, setSearchTerm] = useState("");
   const [panelOpen, setPanelOpen] = useState(false);
   const [panelTitle, setPanelTitle] = useState("");
   const [panelData, setPanelData] = useState<any>(null);
-  const [viewTree, setViewTree] = useState(true);
   const [fieldName, setFieldName] = useState("");
   const [historyTree, setHistoryTree] = useState<any[]>([]);
   const [historyModalOpen, setHistoryModalOpen] = useState(false);
@@ -160,12 +159,11 @@ const HarMethodsTabPage: React.FC = () => {
   };
 
   const openPanel = (title: string, data: any) => {
-    const isRequest = title?.toLowerCase().includes("request");
     setPanelTitle(title);
     setPanelData(data);
     setPanelOpen(true);
-    if (isRequest) {
-      editModalHook.setEditPayload(data);
+    if (data?._rowType === "http" && data?.requestPayload) {
+      editModalHook.setEditPayload(data.requestPayload);
     }
   };
 
@@ -236,14 +234,15 @@ const HarMethodsTabPage: React.FC = () => {
     >
       <ResizablePanels
         isDarkMode={isDarkMode}
-        defaultLeftWidth={60}
-        minLeftWidth={25}
-        maxLeftWidth={75}
+        defaultLeftWidth={panelOpen ? 40 : 100}
+        minLeftWidth={20}
+        maxLeftWidth={80}
+        showRightPanel={panelOpen}
         leftPanel={
           <div className="h-full flex flex-col">
             {/* Sticky Header Section */}
             <div className="sticky top-0 z-10 bg-inherit border-b border-gray-200 dark:border-gray-700">
-              <div className="p-2 space-y-2">
+              <div className="p-1 space-y-1">
                 <HeaderSection
                   isDarkMode={isDarkMode}
                   totalRequests={totalRequests}
@@ -269,7 +268,7 @@ const HarMethodsTabPage: React.FC = () => {
 
             {/* Scrollable Content Area */}
             <div className="flex-1 overflow-auto">
-              <div className="p-2 space-y-2 pb-8">
+              <div className="p-1 space-y-1 pb-4">
                 <Toaster position="top-right" />
 
                 {/* Tables Section */}
@@ -282,6 +281,8 @@ const HarMethodsTabPage: React.FC = () => {
                   isDarkMode={isDarkMode}
                   requestHarReload={requestHarReload}
                   onView={handleView}
+                  isLoading={isLoading}
+                  panelOpen={panelOpen}
                 />
               </div>
             </div>
@@ -292,7 +293,6 @@ const HarMethodsTabPage: React.FC = () => {
             open={panelOpen}
             title={panelTitle}
             data={panelData}
-            viewTree={viewTree}
             onCopy={() =>
               safeCopyToClipboard(JSON.stringify(panelData, null, 2))
             }
@@ -300,7 +300,6 @@ const HarMethodsTabPage: React.FC = () => {
               setPanelOpen(false);
               setSelectedRowKey(null);
             }}
-            onToggleView={setViewTree}
             origin={origin}
             onEditRequest={editModalHook.handleEditRequest}
             isDarkMode={isDarkMode}

@@ -17,6 +17,9 @@ export default defineConfig({
       closeBundle() {
         copyFileSync("manifest.json", "dist/manifest.json");
         copyFileSync("background.js", "dist/background.js");
+        copyFileSync("public/icon-16.png", "dist/icon-16.png");
+        copyFileSync("public/icon-48.png", "dist/icon-48.png");
+        copyFileSync("public/icon-128.png", "dist/icon-128.png");
       },
     },
   ],

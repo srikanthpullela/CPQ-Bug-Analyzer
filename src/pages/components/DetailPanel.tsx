@@ -8,10 +8,8 @@ interface Props {
   open: boolean;
   title: string;
   data: any;
-  viewTree: boolean;
   onCopy: () => void;
   onClose: () => void;
-  onToggleView: (isTree: boolean) => void;
   origin?: string;
   onEditRequest?: (payload: any, method: string) => void;
   isDarkMode?: boolean;
@@ -28,83 +26,134 @@ interface SearchMatch {
   endIndex: number;
 }
 
-// Component for highlighting text in Raw JSON view
-const HighlightedText: React.FC<{
-  text: string;
-  searchQuery: string;
-  caseSensitive: boolean;
-  currentMatchIndex: number;
-  onMatchClick: (index: number) => void;
-}> = ({
-  text,
-  searchQuery,
-  caseSensitive,
-  currentMatchIndex,
-  onMatchClick,
-}) => {
-  if (!searchQuery.trim()) {
-    return <>{text}</>;
-  }
-
-  const searchTerm = caseSensitive ? searchQuery : searchQuery.toLowerCase();
-  const searchableText = caseSensitive ? text : text.toLowerCase();
-
-  const parts = [];
-  let lastIndex = 0;
-  let matchIndex = 0;
-  let index = searchableText.indexOf(searchTerm);
-
-  while (index !== -1) {
-    // Add text before match
-    if (index > lastIndex) {
-      parts.push(
-        <span key={`text-${lastIndex}`}>{text.slice(lastIndex, index)}</span>
-      );
+// Try to JSON.parse any string that *looks* like JSON
+function tryParseJSON(str: string): any {
+  str = str.trim();
+  if (
+    (str.startsWith("{") && str.endsWith("}")) ||
+    (str.startsWith("[") && str.endsWith("]"))
+  ) {
+    try {
+      return JSON.parse(str);
+    } catch {
+      // not parseable
     }
-
-    // Add highlighted match
-    const isCurrentMatch = matchIndex === currentMatchIndex;
-    parts.push(
-      <span
-        key={`match-${matchIndex}`}
-        className={`px-1 py-0.5 rounded-sm cursor-pointer transition-colors duration-200 ${
-          isCurrentMatch
-            ? "bg-yellow-400 text-black font-semibold shadow-sm ring-2 ring-yellow-500"
-            : "bg-yellow-200 text-black hover:bg-yellow-300"
-        }`}
-        onClick={() => onMatchClick(matchIndex)}
-        title={`Match ${matchIndex + 1} - Click to navigate`}
-      >
-        {text.slice(index, index + searchQuery.length)}
-      </span>
-    );
-
-    matchIndex++;
-    lastIndex = index + searchQuery.length;
-    index = searchableText.indexOf(searchTerm, lastIndex);
   }
+  return str;
+}
 
-  // Add remaining text
-  if (lastIndex < text.length) {
-    parts.push(<span key={`text-${lastIndex}`}>{text.slice(lastIndex)}</span>);
+// Recursively walk and replace any JSON-serialized strings
+function deepParse(val: any): any {
+  if (typeof val === "string") {
+    const parsed = tryParseJSON(val);
+    return typeof parsed === "object" ? deepParse(parsed) : parsed;
   }
+  if (Array.isArray(val)) {
+    return val.map(deepParse);
+  }
+  if (val && typeof val === "object") {
+    const out: any = {};
+    for (const [k, v] of Object.entries(val)) {
+      out[k] = deepParse(v);
+    }
+    return out;
+  }
+  return val;
+}
 
-  return <>{parts}</>;
+// Helper function to format header arrays into key-value
+function formatHeadersArray(headers: any[]): Record<string, string> {
+  if (!Array.isArray(headers)) return {};
+  const formatted: Record<string, string> = {};
+  headers.forEach((header, index) => {
+    if (header && typeof header === "object") {
+      if (header.name && header.value !== undefined) {
+        formatted[header.name] = header.value;
+      } else {
+        formatted[`header_${index}`] = JSON.stringify(header);
+      }
+    } else {
+      formatted[`header_${index}`] = String(header);
+    }
+  });
+  return formatted;
+}
+
+// Extract clean payload data (remove internal metadata)
+function extractCleanPayload(data: any): any {
+  if (!data) return {};
+  if (typeof data !== "object") return data;
+
+  const clean = { ...data };
+  const metaKeys = [
+    "_method", "_url", "_headers", "_rawPostData", "_queryString",
+    "_originalPayload", "_noPayload", "_resendMethod", "_resendUrl",
+    "_debug", "_noData",
+  ];
+  metaKeys.forEach((k) => delete clean[k]);
+
+  const remaining = Object.keys(clean).filter((k) => !k.startsWith("_"));
+  if (remaining.length === 0) return {};
+
+  return clean;
+}
+
+const reactJsonThemeDark = {
+  base00: "transparent",
+  base01: "#374151",
+  base02: "#4b5563",
+  base03: "#6b7280",
+  base04: "#9ca3af",
+  base05: "#f3f4f6",
+  base06: "#f9fafb",
+  base07: "#ffffff",
+  base08: "#f87171",
+  base09: "#fb923c",
+  base0A: "#fbbf24",
+  base0B: "#34d399",
+  base0C: "#22d3ee",
+  base0D: "#60a5fa",
+  base0E: "#a78bfa",
+  base0F: "#9ca3af",
 };
 
-export const DetailPanel: React.FC<Props> = ({
-  open,
-  title,
-  data,
-  viewTree,
-  onCopy,
-  onClose,
-  onToggleView,
-  origin,
-  onEditRequest,
-  isDarkMode = false,
-}) => {
-  // State
+const reactJsonThemeLight = {
+  base00: "transparent",
+  base01: "#f8f9fa",
+  base02: "#e9ecef",
+  base03: "#6c757d",
+  base04: "#495057",
+  base05: "#212529",
+  base06: "#212529",
+  base07: "#000000",
+  base08: "#dc3545",
+  base09: "#fd7e14",
+  base0A: "#ffc107",
+  base0B: "#28a745",
+  base0C: "#17a2b8",
+  base0D: "#007bff",
+  base0E: "#6f42c1",
+  base0F: "#6c757d",
+};
+
+const reactJsonStyle = {
+  fontSize: "11px",
+  lineHeight: "1.4",
+  fontFamily: "Menlo, Monaco, Consolas, 'SF Mono', 'Liberation Mono', monospace",
+  backgroundColor: "transparent",
+  padding: "0",
+  maxHeight: "100%",
+  overflow: "visible" as const,
+};
+
+// --- Sub-component: JSON content viewer (tree or raw with search) ---
+const JsonContentView: React.FC<{
+  data: any;
+  isDarkMode: boolean;
+  defaultCollapsed?: number;
+  emptyMessage?: string;
+}> = ({ data, isDarkMode, defaultCollapsed = 2, emptyMessage }) => {
+  const [viewMode, setViewMode] = useState<"tree" | "raw">("tree");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchVisible, setSearchVisible] = useState(false);
   const [caseSensitive, setCaseSensitive] = useState(false);
@@ -112,899 +161,518 @@ export const DetailPanel: React.FC<Props> = ({
   const [searchMatches, setSearchMatches] = useState<SearchMatch[]>([]);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const rawJsonContainerRef = useRef<HTMLDivElement>(null);
-  const [showEditRequest, setShowEditRequest] = useState(false);
-  
-  // Determine the appropriate URL for re-triggering requests
-  const finalUrl = useMemo(() => {
-    // Check for URL in various possible locations
-    if (data?.url || data?._url) {
-      return data.url || data._url;
-    }
-    
-    // For ApexRemote calls specifically, construct the apexremote URL
-    if (data?.patternType === 'apex' || 
-        data?.urlPattern === 'ApexRemote' ||
-        (data?.method && !data?.httpMethod && !data?.endpoint)) {
-      return origin ? `${origin}/apexremote` : null;
-    }
-    
-    // For HTTP calls, try to construct from available data
-    if (data?.patternType === 'http' && data?.endpoint && origin) {
-      // If we have an endpoint, construct the full URL
-      const endpoint = data.endpoint.startsWith('/') ? data.endpoint : `/${data.endpoint}`;
-      return `${origin}${endpoint}`;
-    }
-    
-    // For other cases, we don't have enough info to construct a URL
-    return null;
-  }, [data, origin]);
 
-  // const [rawPayloadText, setRawPayloadText] = useState<string>("");
-  // const [requestPayloadOverride, setRequestPayloadOverride] = useState<any>({});
+  const parsed = useMemo(() => deepParse(data), [data]);
+  const formattedJSON = useMemo(() => JSON.stringify(parsed, null, 2), [parsed]);
 
-  const isRequestView = title?.toLowerCase().includes("request");
-  
-  // Check if we have enough data to re-trigger a request
-  const canRetriggerRequest = data && (
-    // Always show for request views that have URL information
-    (isRequestView && (
-      data.url || 
-      data._url || 
-      data.method || 
-      data._method ||
-      data.displayName ||
-      finalUrl ||
-      data.requestPayload || 
-      data.payload
-    )) ||
-    // Also show for any data that has a finalUrl (can be resent)
-    finalUrl ||
-    // Show for any data with method information
-    data.method ||
-    data._method ||
-    data.httpMethod
-  );
+  const isEmpty =
+    !data ||
+    (typeof data === "object" && Object.keys(data).length === 0);
 
-  // Temporary debug log to check data flow
-  if (open && data) {
-    console.log('DetailPanel - Resend Button Debug:', {
-      title,
-      isRequestView,
-      canRetriggerRequest,
-      hasOnEditRequest: !!onEditRequest,
-      finalUrl,
-      'data.url': data.url,
-      'data.method': data.method,
-      'data.httpMethod': data.httpMethod,
-      'data.displayName': data.displayName,
-      'data.patternType': data.patternType,
-      'data.urlPattern': data.urlPattern,
-      'data.endpoint': data.endpoint,
-      'data keys': Object.keys(data)
-    });
-  }
-
-  // Try to JSON.parse any string that *looks* like JSON
-  function tryParseJSON(str: string): any {
-    str = str.trim();
-    if (
-      (str.startsWith("{") && str.endsWith("}")) ||
-      (str.startsWith("[") && str.endsWith("]"))
-    ) {
-      try {
-        return JSON.parse(str);
-      } catch {
-        // not parseable, fall through
-      }
-    }
-    return str;
-  }
-
-  // Recursively walk and replace any JSON-serialized strings
-  function deepParse(val: any): any {
-    if (typeof val === "string") {
-      const parsed = tryParseJSON(val);
-      // if we got an object/array back, recurse into it
-      return typeof parsed === "object" ? deepParse(parsed) : parsed;
-    }
-    if (Array.isArray(val)) {
-      return val.map(deepParse);
-    }
-    if (val && typeof val === "object") {
-      const out: any = {};
-      for (const [k, v] of Object.entries(val)) {
-        out[k] = deepParse(v);
-      }
-      return out;
-    }
-    return val;
-  }
-
-  // Find matches in raw JSON text
-  const findMatchesInRawJSON = useCallback(
-    (jsonText: string, query: string): SearchMatch[] => {
+  const findMatches = useCallback(
+    (text: string, query: string): SearchMatch[] => {
       if (!query.trim()) return [];
-
       const matches: SearchMatch[] = [];
-      const searchTerm = caseSensitive ? query : query.toLowerCase();
-      const searchableText = caseSensitive ? jsonText : jsonText.toLowerCase();
-
-      let index = searchableText.indexOf(searchTerm);
-      let matchIndex = 0;
-
-      while (index !== -1) {
+      const term = caseSensitive ? query : query.toLowerCase();
+      const searchable = caseSensitive ? text : text.toLowerCase();
+      let idx = searchable.indexOf(term);
+      let mi = 0;
+      while (idx !== -1) {
         matches.push({
-          path: [],
-          type: "value",
-          index: matchIndex++,
-          text: jsonText.slice(index, index + query.length),
-          startIndex: index,
-          endIndex: index + query.length,
-          value: jsonText.slice(index, index + query.length),
+          path: [], type: "value", index: mi++,
+          text: text.slice(idx, idx + query.length),
+          startIndex: idx, endIndex: idx + query.length,
+          value: text.slice(idx, idx + query.length),
         });
-        index = searchableText.indexOf(searchTerm, index + 1);
+        idx = searchable.indexOf(term, idx + 1);
       }
-
       return matches;
     },
     [caseSensitive]
   );
 
-  // Render highlighted JSON text
-  const renderHighlightedJSON = (jsonText: string) => {
-    if (!searchQuery.trim() || searchMatches.length === 0) {
-      return <pre className="whitespace-pre-wrap break-words" style={{ fontFamily: "monospace", fontSize: "0.75rem" }}>{jsonText}</pre>;
-    }
-
-    const parts = [];
-    let lastIndex = 0;
-
-    searchMatches.forEach((match, index) => {
-      // Add text before match
-      if (match.startIndex > lastIndex) {
-        parts.push(
-          <span key={`text-${lastIndex}`}>
-            {jsonText.slice(lastIndex, match.startIndex)}
-          </span>
-        );
-      }
-
-      // Add highlighted match
-      const isCurrentMatch = index === currentMatchIndex;
-      parts.push(
-        <span
-          key={`match-${index}`}
-          id={`search-match-${index}`}
-          className={`px-1 py-0.5 rounded-sm cursor-pointer transition-all duration-200 ${
-            isCurrentMatch
-              ? "bg-yellow-400 text-black font-semibold shadow-md ring-2 ring-yellow-500 ring-offset-1"
-              : "bg-yellow-200 text-black hover:bg-yellow-300"
-          }`}
-          onClick={() => setCurrentMatchIndex(index)}
-          title={`Match ${index + 1} of ${searchMatches.length}`}
-        >
-          {jsonText.slice(match.startIndex, match.endIndex)}
-        </span>
-      );
-
-      lastIndex = match.endIndex;
-    });
-
-    // Add remaining text
-    if (lastIndex < jsonText.length) {
-      parts.push(
-        <span key={`text-${lastIndex}`}>{jsonText.slice(lastIndex)}</span>
-      );
-    }
-
-    return <pre className="whitespace-pre-wrap break-words">{parts}</pre>;
-  };
-
-  // Handle search navigation with proper scrolling
-  const goToNextMatch = useCallback(() => {
-    if (searchMatches.length > 0) {
-      setCurrentMatchIndex((prev) => (prev + 1) % searchMatches.length);
-    }
-  }, [searchMatches.length]);
-
-  const goToPrevMatch = useCallback(() => {
-    if (searchMatches.length > 0) {
-      setCurrentMatchIndex(
-        (prev) => (prev - 1 + searchMatches.length) % searchMatches.length
-      );
-    }
-  }, [searchMatches.length]);
-
-  // Scroll to current match
   useEffect(() => {
-    if (searchMatches.length > 0 && currentMatchIndex >= 0 && !viewTree) {
-      const matchElement = document.getElementById(
-        `search-match-${currentMatchIndex}`
-      );
-      if (matchElement && rawJsonContainerRef.current) {
-        // Scroll the match into view
-        matchElement.scrollIntoView({
-          behavior: "smooth",
-          block: "center",
-          inline: "nearest",
-        });
-
-        // Add a brief flash effect to make it more visible
-        matchElement.style.transform = "scale(1.05)";
-        setTimeout(() => {
-          matchElement.style.transform = "scale(1)";
-        }, 200);
-      }
-    }
-  }, [currentMatchIndex, searchMatches, viewTree]);
-
-  // Enhanced keyboard handler
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      // Open search with Ctrl+F/Cmd+F
-      if ((e.ctrlKey || e.metaKey) && e.key === "f") {
-        e.preventDefault();
-        setSearchVisible(true);
-        setTimeout(() => searchInputRef.current?.focus(), 100);
-        return;
-      }
-
-      // Search navigation when search is active
-      if (searchVisible && searchMatches.length > 0) {
-        if (e.key === "Enter") {
-          e.preventDefault();
-          if (e.shiftKey) {
-            goToPrevMatch();
-          } else {
-            goToNextMatch();
-          }
-        }
-      }
-
-      // Close search with Escape
-      if (e.key === "Escape" && searchVisible) {
-        setSearchVisible(false);
-        setSearchQuery("");
-        setSearchMatches([]);
-      }
-
-      // Original functionality preserved
-      if ((e.ctrlKey || e.metaKey) && e.key === "f" && !searchVisible) {
-        onToggleView(false);
-      }
-    };
-
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [
-    onToggleView,
-    searchVisible,
-    searchMatches.length,
-    goToNextMatch,
-    goToPrevMatch,
-  ]);
-
-  // Enhanced function to format header data for better display
-  const formatHeaderData = (data: any) => {
-    // Check if this is header data
-    if (data && typeof data === 'object' && (data.requestHeaders || data.responseHeaders || data._info)) {
-      return {
-        _headerInfo: {
-          url: data.url || 'Unknown URL',
-          method: data.method || 'Unknown Method',
-          status: data.status || 'Unknown Status',
-          summary: data._info || {}
-        },
-        requestHeaders: data.requestHeaders || [],
-        responseHeaders: data.responseHeaders || [],
-        _formattedHeaders: {
-          request: formatHeadersArray(data.requestHeaders || []),
-          response: formatHeadersArray(data.responseHeaders || [])
-        }
-      };
-    }
-    return data;
-  };
-
-  // Function to extract clean payload data for DetailPanel display
-  const extractDisplayData = (data: any) => {
-    if (!data) return {};
-
-    // For Request views, show only the actual payload/request data
-    if (isRequestView) {
-      // Try to get the actual request payload
-      if (data.requestPayload) {
-        // If requestPayload exists, show it
-        return data.requestPayload;
-      } else if (data.payload) {
-        // If payload exists, show it but filter out metadata
-        const cleanPayload = { ...data.payload };
-        
-        // Remove technical metadata fields that aren't useful for users
-        delete cleanPayload._method;
-        delete cleanPayload._url;
-        delete cleanPayload._headers;
-        delete cleanPayload._rawPostData;
-        delete cleanPayload._queryString;
-        delete cleanPayload._originalPayload;
-        delete cleanPayload._noPayload;
-        delete cleanPayload._resendMethod;
-        delete cleanPayload._resendUrl;
-        delete cleanPayload.url;
-        delete cleanPayload.requestHeaders;
-        delete cleanPayload.responseHeaders;
-        delete cleanPayload.headers;
-        delete cleanPayload._debug;
-        
-        // If after cleaning we have meaningful data, return it
-        const remainingKeys = Object.keys(cleanPayload);
-        if (remainingKeys.length > 0) {
-          // Check if all remaining values are meaningful (not empty or metadata)
-          const meaningfulData = remainingKeys.some(key => {
-            const value = cleanPayload[key];
-            return value !== null && value !== undefined && value !== '' && 
-                   !key.startsWith('_') && typeof value !== 'undefined';
-          });
-          
-          if (meaningfulData) {
-            return cleanPayload;
-          }
-        }
-        
-        // If no meaningful payload data, return empty object
-        return {};
-      } else {
-        // For basic request data, try to extract meaningful content
-        const extractedData: any = {};
-        
-        // Look for common request fields
-        if (data.method && !data.method.startsWith('_')) {
-          extractedData.method = data.method;
-        }
-        
-        // Copy any data that doesn't look like metadata
-        Object.keys(data).forEach(key => {
-          if (!key.startsWith('_') && 
-              !['url', 'timestamp', 'endTime', 'baseUrl', 'hasMessages', 
-                'requestHeaders', 'responseHeaders', 'headers', 'patternType', 
-                'urlPattern', 'httpMethod', 'displayName', 'endpoint'].includes(key)) {
-            const value = data[key];
-            if (value !== null && value !== undefined && value !== '') {
-              extractedData[key] = value;
-            }
-          }
-        });
-        
-        return Object.keys(extractedData).length > 0 ? extractedData : {};
-      }
-    }
-    
-    // For Response views or other views, show all data but formatted nicely
-    return data;
-  };
-
-  // Helper function to format header arrays
-  const formatHeadersArray = (headers: any[]) => {
-    if (!Array.isArray(headers)) return {};
-    
-    const formatted: Record<string, string> = {};
-    headers.forEach((header, index) => {
-      if (header && typeof header === 'object') {
-        if (header.name && header.value !== undefined) {
-          formatted[header.name] = header.value;
-        } else {
-          formatted[`header_${index}`] = JSON.stringify(header);
-        }
-      } else {
-        formatted[`header_${index}`] = String(header);
-      }
-    });
-    return formatted;
-  };
-
-  // Enhanced parsed data - use clean payload for Request views, full data for others
-  const parsedData = useMemo(() => {
-    // First extract the appropriate data based on view type
-    const displayData = extractDisplayData(data);
-    
-    // Then do the deep parsing and header formatting
-    const deepParsed = deepParse(displayData);
-    
-    // Only format header data for non-request views or when we have header-specific data
-    if (!isRequestView || (displayData && (displayData.requestHeaders || displayData.responseHeaders))) {
-      return formatHeaderData(deepParsed);
-    }
-    
-    return deepParsed;
-  }, [data, isRequestView]);
-
-  // Get formatted JSON string
-  const formattedJSON = useMemo(() => {
-    return JSON.stringify(parsedData, null, 2);
-  }, [parsedData]);
-
-  // Update search matches when query or data changes
-  useEffect(() => {
-    if (searchQuery && !viewTree) {
-      const matches = findMatchesInRawJSON(formattedJSON, searchQuery);
-      setSearchMatches(matches);
+    if (searchQuery && viewMode === "raw") {
+      const m = findMatches(formattedJSON, searchQuery);
+      setSearchMatches(m);
       setCurrentMatchIndex(0);
     } else {
       setSearchMatches([]);
       setCurrentMatchIndex(0);
     }
-  }, [searchQuery, formattedJSON, viewTree, findMatchesInRawJSON]);
+  }, [searchQuery, formattedJSON, viewMode, findMatches]);
 
-  if (!open) return null;
+  const goNext = useCallback(() => {
+    if (searchMatches.length > 0)
+      setCurrentMatchIndex((p) => (p + 1) % searchMatches.length);
+  }, [searchMatches.length]);
+
+  const goPrev = useCallback(() => {
+    if (searchMatches.length > 0)
+      setCurrentMatchIndex((p) => (p - 1 + searchMatches.length) % searchMatches.length);
+  }, [searchMatches.length]);
+
+  useEffect(() => {
+    if (searchMatches.length > 0 && currentMatchIndex >= 0 && viewMode === "raw") {
+      const el = document.getElementById(`search-match-${currentMatchIndex}`);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [currentMatchIndex, searchMatches, viewMode]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "f") {
+        e.preventDefault();
+        setViewMode("raw");
+        setSearchVisible(true);
+        setTimeout(() => searchInputRef.current?.focus(), 100);
+      }
+      if (searchVisible && searchMatches.length > 0 && e.key === "Enter") {
+        e.preventDefault();
+        e.shiftKey ? goPrev() : goNext();
+      }
+      if (e.key === "Escape" && searchVisible) {
+        setSearchVisible(false);
+        setSearchQuery("");
+        setSearchMatches([]);
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [searchVisible, searchMatches.length, goNext, goPrev]);
+
+  const renderHighlightedJSON = (jsonText: string) => {
+    if (!searchQuery.trim() || searchMatches.length === 0) {
+      return (
+        <pre className="whitespace-pre-wrap break-words" style={{ fontFamily: "Menlo, Monaco, Consolas, monospace", fontSize: "11px", lineHeight: "1.4" }}>
+          {jsonText}
+        </pre>
+      );
+    }
+    const parts: React.ReactNode[] = [];
+    let lastIndex = 0;
+    searchMatches.forEach((match, index) => {
+      if (match.startIndex > lastIndex) {
+        parts.push(<span key={`t-${lastIndex}`}>{jsonText.slice(lastIndex, match.startIndex)}</span>);
+      }
+      const isCurrent = index === currentMatchIndex;
+      parts.push(
+        <span
+          key={`m-${index}`}
+          id={`search-match-${index}`}
+          className={`px-0.5 rounded-sm cursor-pointer ${
+            isCurrent
+              ? "bg-yellow-400 text-black font-semibold ring-2 ring-yellow-500"
+              : "bg-yellow-200 text-black hover:bg-yellow-300"
+          }`}
+          onClick={() => setCurrentMatchIndex(index)}
+        >
+          {jsonText.slice(match.startIndex, match.endIndex)}
+        </span>
+      );
+      lastIndex = match.endIndex;
+    });
+    if (lastIndex < jsonText.length) {
+      parts.push(<span key={`t-${lastIndex}`}>{jsonText.slice(lastIndex)}</span>);
+    }
+    return <pre className="whitespace-pre-wrap break-words" style={{ fontFamily: "Menlo, Monaco, Consolas, monospace", fontSize: "11px", lineHeight: "1.4" }}>{parts}</pre>;
+  };
+
+  if (isEmpty && emptyMessage) {
+    return (
+      <div className={`h-full flex items-center justify-center text-center text-xs ${isDarkMode ? "text-gray-500" : "text-gray-400"}`}>
+        {emptyMessage}
+      </div>
+    );
+  }
 
   return (
-    <div className={`h-full flex flex-col shadow-lg transition-colors duration-200 ${
-      isDarkMode ? "bg-gray-800" : "bg-white"
-    }`}>
-      {/* Header section */}
-      <div className={`flex-shrink-0 border-b px-6 py-4 transition-colors duration-200 ${
-        isDarkMode 
-          ? "bg-gray-800 border-gray-700" 
-          : "bg-white border-gray-200"
-      }`}>
-        <div className="flex justify-between items-center mb-4">
-          <span className={`font-semibold truncate pr-4 transition-colors duration-200 ${
-            isDarkMode ? "text-gray-100" : "text-gray-900"
-          }`}>
-            {title}
-            {/* Show header info if this is header data */}
-            {parsedData?._headerInfo && (
-              <div className={`text-xs mt-1 transition-colors duration-200 ${
-                isDarkMode ? "text-gray-400" : "text-gray-500"
-              }`}>
-                {parsedData._headerInfo.method} {parsedData._headerInfo.url} 
-                {parsedData._headerInfo.status && ` (${parsedData._headerInfo.status})`}
-              </div>
-            )}
+    <div className="h-full flex flex-col">
+      {/* View mode toggle + search */}
+      <div className={`flex items-center justify-between px-2 py-1 border-b ${isDarkMode ? "border-gray-700" : "border-gray-200"}`}>
+        <div className="flex items-center gap-3">
+          <label className="flex items-center cursor-pointer">
+            <input type="radio" checked={viewMode === "tree"} onChange={() => setViewMode("tree")}
+              className={`w-3 h-3 text-blue-600 ${isDarkMode ? "bg-gray-600" : "bg-gray-100"}`} />
+            <span className={`ml-1 text-[11px] font-medium ${isDarkMode ? "text-gray-300" : "text-gray-700"}`}>Tree</span>
+          </label>
+          <label className="flex items-center cursor-pointer">
+            <input type="radio" checked={viewMode === "raw"} onChange={() => setViewMode("raw")}
+              className={`w-3 h-3 text-blue-600 ${isDarkMode ? "bg-gray-600" : "bg-gray-100"}`} />
+            <span className={`ml-1 text-[11px] font-medium ${isDarkMode ? "text-gray-300" : "text-gray-700"}`}>Raw</span>
+          </label>
+        </div>
+        {viewMode === "raw" && (
+          <button
+            onClick={() => { setSearchVisible(!searchVisible); if (!searchVisible) setTimeout(() => searchInputRef.current?.focus(), 100); }}
+            className={`text-[11px] px-1.5 py-0.5 rounded border ${
+              searchVisible
+                ? isDarkMode ? "text-blue-300 bg-blue-900 border-blue-600" : "text-blue-700 bg-blue-50 border-blue-300"
+                : isDarkMode ? "text-gray-400 border-gray-600 hover:bg-gray-700" : "text-gray-500 border-gray-300 hover:bg-gray-50"
+            }`}
+          >
+            Search{searchMatches.length > 0 ? ` (${searchMatches.length})` : ""}
+          </button>
+        )}
+      </div>
+
+      {/* Search bar */}
+      {searchVisible && viewMode === "raw" && (
+        <div className={`flex items-center gap-1 px-2 py-1 border-b ${isDarkMode ? "border-gray-700 bg-gray-800" : "border-gray-200 bg-gray-50"}`}>
+          <input
+            ref={searchInputRef}
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search..."
+            className={`flex-1 px-1.5 py-0.5 text-[11px] border rounded ${isDarkMode ? "border-gray-600 bg-gray-700 text-gray-100" : "border-gray-300 bg-white text-gray-900"}`}
+          />
+          <button onClick={goPrev} disabled={searchMatches.length === 0} className={`p-0.5 rounded disabled:opacity-30 ${isDarkMode ? "text-gray-400 hover:text-white" : "text-gray-500 hover:text-black"}`}>
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>
+          </button>
+          <button onClick={goNext} disabled={searchMatches.length === 0} className={`p-0.5 rounded disabled:opacity-30 ${isDarkMode ? "text-gray-400 hover:text-white" : "text-gray-500 hover:text-black"}`}>
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+          </button>
+          <label className="flex items-center cursor-pointer">
+            <input type="checkbox" checked={caseSensitive} onChange={(e) => setCaseSensitive(e.target.checked)}
+              className={`w-3 h-3 rounded ${isDarkMode ? "bg-gray-600" : "bg-gray-100"}`} />
+            <span className={`ml-1 text-[10px] ${isDarkMode ? "text-gray-400" : "text-gray-500"}`}>Aa</span>
+          </label>
+          {searchMatches.length > 0 && (
+            <span className={`text-[10px] ${isDarkMode ? "text-blue-300" : "text-blue-600"}`}>
+              {currentMatchIndex + 1}/{searchMatches.length}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* Content */}
+      <div className="flex-1 overflow-auto p-1">
+        {viewMode === "tree" ? (
+          <ReactJson
+            src={typeof parsed === "object" && Object.keys(parsed).length > 0 ? parsed : { value: parsed }}
+            name={false}
+            collapsed={defaultCollapsed}
+            enableClipboard={false}
+            displayDataTypes={false}
+            displayObjectSize={false}
+            indentWidth={2}
+            style={reactJsonStyle}
+            theme={isDarkMode ? reactJsonThemeDark : reactJsonThemeLight}
+          />
+        ) : (
+          <div ref={rawJsonContainerRef} className={`font-mono text-[11px] leading-snug ${isDarkMode ? "text-gray-200" : "text-gray-800"}`}>
+            {renderHighlightedJSON(formattedJSON)}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+// --- Sub-component: Headers view (like Chrome) ---
+const HeadersView: React.FC<{
+  data: any;
+  isDarkMode: boolean;
+}> = ({ data, isDarkMode }) => {
+  const isHttp = data?._rowType === "http";
+
+  const requestHeaders = isHttp
+    ? formatHeadersArray(data?.headers?.requestHeaders || data?.headers?.request || [])
+    : formatHeadersArray(data?.headers?.connectionHeaders || []);
+  const responseHeaders = isHttp
+    ? formatHeadersArray(data?.headers?.responseHeaders || data?.headers?.response || [])
+    : formatHeadersArray(data?.headers?.responseHeaders || []);
+
+  const generalInfo: Record<string, string> = {};
+  if (isHttp) {
+    if (data.headers?.url) generalInfo["Request URL"] = data.headers.url;
+    if (data.httpMethod || data.headers?.method) generalInfo["Request Method"] = data.httpMethod || data.headers?.method || "";
+    if (data.status !== null && data.status !== undefined) generalInfo["Status Code"] = String(data.status);
+    if (data.urlPattern) generalInfo["URL Pattern"] = data.urlPattern;
+    if (data.patternType) generalInfo["Pattern Type"] = data.patternType;
+  } else {
+    if (data.headers?.url || data.endpoint) generalInfo["URL"] = data.headers?.url || data.endpoint || "";
+    generalInfo["Type"] = "WebSocket";
+    if (data.direction) generalInfo["Direction"] = data.direction;
+    if (data.status !== null && data.status !== undefined) generalInfo["Status"] = String(data.status);
+  }
+
+  const hasRequestHeaders = Object.keys(requestHeaders).length > 0;
+  const hasResponseHeaders = Object.keys(responseHeaders).length > 0;
+  const hasGeneral = Object.keys(generalInfo).length > 0;
+
+  const Section: React.FC<{ title: string; entries: Record<string, string> }> = ({ title, entries }) => (
+    <div className="mb-2">
+      <div className={`text-[11px] font-semibold px-2 py-1 ${isDarkMode ? "text-gray-200" : "text-gray-800"}`}>
+        {title}
+      </div>
+      <table className="w-full">
+        <tbody>
+          {Object.entries(entries).map(([k, v]) => (
+            <tr key={k} className={`border-b ${isDarkMode ? "border-gray-700" : "border-gray-100"}`}>
+              <td className={`px-2 py-0.5 text-[11px] font-medium whitespace-nowrap align-top ${isDarkMode ? "text-gray-400" : "text-gray-500"}`}>
+                {k}:
+              </td>
+              <td className={`px-2 py-0.5 text-[11px] break-all ${isDarkMode ? "text-gray-200" : "text-gray-800"}`}>
+                {v}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+
+  if (!hasGeneral && !hasRequestHeaders && !hasResponseHeaders) {
+    return (
+      <div className={`h-full flex items-center justify-center text-xs ${isDarkMode ? "text-gray-500" : "text-gray-400"}`}>
+        No headers available
+      </div>
+    );
+  }
+
+  return (
+    <div className="overflow-auto h-full p-1" style={{ fontFamily: "Menlo, Monaco, Consolas, monospace" }}>
+      {hasGeneral && <Section title="General" entries={generalInfo} />}
+      {hasResponseHeaders && <Section title="Response Headers" entries={responseHeaders} />}
+      {hasRequestHeaders && <Section title={isHttp ? "Request Headers" : "Connection Headers"} entries={requestHeaders} />}
+    </div>
+  );
+};
+
+// --- Main DetailPanel ---
+export const DetailPanel: React.FC<Props> = ({
+  open,
+  title,
+  data,
+  onCopy,
+  onClose,
+  origin,
+  onEditRequest,
+  isDarkMode = false,
+}) => {
+  const [activeTab, setActiveTab] = useState<string>("preview");
+
+  const isHttp = data?._rowType === "http";
+  const isWs = data?._rowType === "ws";
+
+  const tabs = useMemo(() => {
+    if (isWs) {
+      return [
+        { id: "response", label: "Response" },
+        { id: "headers", label: "Headers" },
+      ];
+    }
+    return [
+      { id: "headers", label: "Headers" },
+      { id: "payload", label: "Payload" },
+      { id: "preview", label: "Preview" },
+      { id: "response", label: "Response" },
+    ];
+  }, [isWs]);
+
+  // Only reset tab when switching between row types (HTTP <-> WS)
+  const prevRowType = useRef<string | undefined>();
+  useEffect(() => {
+    if (data) {
+      const currentType = data._rowType;
+      if (prevRowType.current !== currentType) {
+        setActiveTab(isWs ? "response" : "headers");
+        prevRowType.current = currentType;
+      }
+    }
+  }, [data, isWs]);
+
+  const payloadData = useMemo(() => {
+    if (isHttp) {
+      return extractCleanPayload(data?.requestPayload);
+    }
+    return null;
+  }, [data, isHttp]);
+
+  const responseData = useMemo(() => {
+    if (isHttp) return deepParse(data?.responsePayload || {});
+    if (isWs) return deepParse(data?.payload || {});
+    return {};
+  }, [data, isHttp, isWs]);
+
+  const finalUrl = useMemo(() => {
+    if (data?.requestPayload?._url || data?.requestPayload?.url) {
+      return data.requestPayload._url || data.requestPayload.url;
+    }
+    if (data?.headers?.url) return data.headers.url;
+    if (data?.patternType === "apex" || data?.urlPattern === "ApexRemote") {
+      return origin ? `${origin}/apexremote` : null;
+    }
+    if (data?.patternType === "http" && data?.endpoint && origin) {
+      const ep = data.endpoint.startsWith("/") ? data.endpoint : `/${data.endpoint}`;
+      return `${origin}${ep}`;
+    }
+    return null;
+  }, [data, origin]);
+
+  const canResend = isHttp && data && (finalUrl || data.requestPayload?._url || data.requestPayload?._method);
+
+  if (!open || !data) return null;
+
+  const displayTitle = title || data?.method || data?.endpoint || "Details";
+
+  // WS rows: show plain JSON viewer with title bar only (no tabs)
+  if (isWs) {
+    return (
+      <div className={`h-full flex flex-col shadow-lg transition-colors duration-200 ${isDarkMode ? "bg-gray-800" : "bg-white"}`}>
+        {/* Title bar */}
+        <div className={`flex-shrink-0 flex items-center justify-between px-2 py-1 border-b ${isDarkMode ? "bg-gray-800 border-gray-700" : "bg-white border-gray-200"}`}>
+          <span className={`text-xs font-semibold truncate ${isDarkMode ? "text-gray-100" : "text-gray-900"}`}>
+            {displayTitle}
           </span>
-          
-          <div className="flex items-center gap-3">
-            {/* Search Toggle Button - Only show when in Raw JSON view */}
-            {!viewTree && (
-              <button
-                onClick={() => {
-                  setSearchVisible(!searchVisible);
-                  if (!searchVisible) {
-                    setTimeout(() => searchInputRef.current?.focus(), 100);
-                  }
-                }}
-                className={`inline-flex items-center px-3 py-2 text-sm font-medium rounded-lg border transition-colors duration-200 ${
-                  searchVisible
-                    ? (isDarkMode 
-                        ? "text-blue-300 bg-blue-900 border-blue-600" 
-                        : "text-blue-700 bg-blue-50 border-blue-300")
-                    : (isDarkMode 
-                        ? "text-gray-300 bg-gray-700 border-gray-600 hover:bg-gray-600" 
-                        : "text-gray-700 bg-white border-gray-300 hover:bg-gray-50")
-                }`}
-              >
-                <svg
-                  className="w-4 h-4 mr-2"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"
-                  />
-                </svg>
-                Search
-                {searchMatches.length > 0 && (
-                  <span className={`ml-2 px-2 py-0.5 text-xs rounded-full ${
-                    isDarkMode 
-                      ? "bg-blue-800 text-blue-200" 
-                      : "bg-blue-100 text-blue-800"
-                  }`}>
-                    {searchMatches.length}
-                  </span>
-                )}
-              </button>
-            )}
-
-            {canRetriggerRequest && onEditRequest && (
-              <button
-                onClick={() => {
-                  if (onEditRequest) {
-                    // Create enhanced data with the correct URL and method for resending
-                    const enhancedData = {
-                      ...data,
-                      url: finalUrl || data.url || data._url, // Ensure we use the correct URL
-                      _resendUrl: finalUrl || data.url || data._url, // Add explicit resend URL for reference
-                    };
-                    onEditRequest(enhancedData, data.method || data._method || data.displayName || 'HTTP Request');
-                  }
-                }}
-                className={`inline-flex items-center px-4 py-2 text-sm font-medium text-white rounded-lg transition-colors ${
-                  isDarkMode 
-                    ? "bg-green-700 hover:bg-green-600" 
-                    : "bg-green-600 hover:bg-green-700"
-                }`}
-              >
-                Resend
-              </button>
-            )}
-
+          <div className="flex items-center gap-1.5">
             <button
-              onClick={onCopy}
-              className={`inline-flex items-center px-4 py-2 text-sm font-medium border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 transition-colors duration-200 ${
-                isDarkMode 
-                  ? "text-gray-200 bg-gray-700 border-gray-600 hover:bg-gray-600 hover:text-blue-300" 
-                  : "text-gray-700 bg-white border-gray-300 hover:bg-gray-50 hover:text-blue-600"
-              }`}
+              onClick={() => {
+                navigator.clipboard?.writeText(JSON.stringify(responseData, null, 2)).catch(() => {});
+              }}
+              className={`p-1 rounded ${isDarkMode ? "text-gray-400 hover:text-gray-200 hover:bg-gray-700" : "text-gray-400 hover:text-gray-600 hover:bg-gray-100"}`}
+              title="Copy"
             >
-              <svg
-                className="w-5 h-5 mr-2"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"
-                />
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
               </svg>
             </button>
             <button
               onClick={onClose}
-              className={`inline-flex items-center justify-center w-9 h-9 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-1 transition-colors duration-200 ${
-                isDarkMode 
-                  ? "text-gray-400 hover:text-gray-200 hover:bg-gray-700" 
-                  : "text-gray-400 hover:text-gray-600 hover:bg-gray-100"
-              }`}
+              className={`p-1 rounded ${isDarkMode ? "text-gray-400 hover:text-gray-200 hover:bg-gray-700" : "text-gray-400 hover:text-gray-600 hover:bg-gray-100"}`}
             >
-              <svg
-                className="w-5 h-5"
-                fill="none"
-                stroke="currentColor"
-                viewBox="0 0 24 24"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M6 18L18 6M6 6l12 12"
-                />
+              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </button>
           </div>
         </div>
-
-        {/* Search Bar - Only show when in Raw JSON view */}
-        {searchVisible && !viewTree && (
-          <div className={`mb-4 p-4 rounded-lg border transition-colors duration-200 ${
-            isDarkMode 
-              ? "bg-gradient-to-r from-gray-800 to-gray-700 border-gray-600" 
-              : "bg-gradient-to-r from-blue-50 to-indigo-50 border-blue-200"
-          }`}>
-            <div className="flex items-center gap-2 mb-3">
-              <div className="flex-1 relative">
-                <input
-                  ref={searchInputRef}
-                  type="text"
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  placeholder="Search in JSON text..."
-                  className={`w-full px-4 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 shadow-sm transition-colors duration-200 ${
-                    isDarkMode 
-                      ? "border-gray-600 bg-gray-700 text-gray-100 placeholder-gray-400" 
-                      : "border-gray-300 bg-white text-gray-900 placeholder-gray-500"
-                  }`}
-                />
-                {searchQuery && (
-                  <button
-                    onClick={() => {
-                      setSearchQuery("");
-                      setSearchMatches([]);
-                    }}
-                    className={`absolute right-3 top-1/2 transform -translate-y-1/2 transition-colors ${
-                      isDarkMode 
-                        ? "text-gray-400 hover:text-gray-200" 
-                        : "text-gray-400 hover:text-gray-600"
-                    }`}
-                  >
-                    <svg
-                      className="w-4 h-4"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M6 18L18 6M6 6l12 12"
-                      />
-                    </svg>
-                  </button>
-                )}
-              </div>
-
-              {/* Navigation buttons */}
-              <div className={`flex items-center gap-1 rounded-lg p-1 shadow-sm transition-colors duration-200 ${
-                isDarkMode ? "bg-gray-700" : "bg-white"
-              }`}>
-                <button
-                  onClick={goToPrevMatch}
-                  disabled={searchMatches.length === 0}
-                  className={`p-2 rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors ${
-                    isDarkMode 
-                      ? "text-gray-400 hover:text-gray-200 hover:bg-gray-600" 
-                      : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
-                  }`}
-                  title="Previous match (Shift+Enter)"
-                >
-                  <svg
-                    className="w-4 h-4"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M5 15l7-7 7 7"
-                    />
-                  </svg>
-                </button>
-                <button
-                  onClick={goToNextMatch}
-                  disabled={searchMatches.length === 0}
-                  className={`p-2 rounded disabled:opacity-50 disabled:cursor-not-allowed transition-colors ${
-                    isDarkMode 
-                      ? "text-gray-400 hover:text-gray-200 hover:bg-gray-600" 
-                      : "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
-                  }`}
-                  title="Next match (Enter)"
-                >
-                  <svg
-                    className="w-4 h-4"
-                    fill="none"
-                    stroke="currentColor"
-                    viewBox="0 0 24 24"
-                  >
-                    <path
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      strokeWidth={2}
-                      d="M19 9l-7 7-7-7"
-                    />
-                  </svg>
-                </button>
-              </div>
-            </div>
-
-            <div className="flex items-center justify-between text-sm">
-              <div className="flex items-center gap-4">
-                <label className="flex items-center cursor-pointer group">
-                  <input
-                    type="checkbox"
-                    checked={caseSensitive}
-                    onChange={(e) => setCaseSensitive(e.target.checked)}
-                    className={`w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500 focus:ring-2 rounded ${
-                      isDarkMode ? "bg-gray-600" : "bg-gray-100"
-                    }`}
-                  />
-                  <span className={`ml-2 transition-colors duration-200 ${
-                    isDarkMode 
-                      ? "text-gray-300 group-hover:text-gray-100" 
-                      : "text-gray-700 group-hover:text-gray-900"
-                  }`}>
-                    Case sensitive
-                  </span>
-                </label>
-              </div>
-
-              <div className="flex items-center gap-2">
-                {searchMatches.length > 0 && (
-                  <div className={`flex items-center gap-1 px-2 py-1 rounded-md shadow-sm transition-colors duration-200 ${
-                    isDarkMode ? "bg-gray-700" : "bg-white"
-                  }`}>
-                    <div className="w-2 h-2 bg-yellow-400 rounded-full"></div>
-                    <span className={`text-xs transition-colors duration-200 ${
-                      isDarkMode ? "text-gray-300" : "text-gray-600"
-                    }`}>Highlighted</span>
-                  </div>
-                )}
-                <div className={`font-medium transition-colors duration-200 ${
-                  isDarkMode ? "text-gray-300" : "text-gray-600"
-                }`}>
-                  {searchMatches.length > 0 ? (
-                    <span className={isDarkMode ? "text-blue-300" : "text-blue-700"}>
-                      {currentMatchIndex + 1} of {searchMatches.length} matches
-                    </span>
-                  ) : searchQuery ? (
-                    <span className={isDarkMode ? "text-red-400" : "text-red-600"}>No matches found</span>
-                  ) : (
-                    <span>Enter search term</span>
-                  )}
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Enhanced view toggle with header info */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-6">
-            <label className="flex items-center cursor-pointer group">
-              <input
-                type="radio"
-                checked={viewTree}
-                onChange={() => onToggleView(true)}
-                className={`w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500 focus:ring-2 transition-colors duration-200 ${
-                  isDarkMode ? "bg-gray-600" : "bg-gray-100"
-                }`}
-              />
-              <span className={`ml-3 text-sm font-medium transition-colors duration-200 ${
-                isDarkMode 
-                  ? "text-gray-300 group-hover:text-gray-100" 
-                  : "text-gray-700 group-hover:text-gray-900"
-              }`}>
-                Tree View
-              </span>
-            </label>
-            <label className="flex items-center cursor-pointer group">
-              <input
-                type="radio"
-                checked={!viewTree}
-                onChange={() => onToggleView(false)}
-                className={`w-4 h-4 text-blue-600 border-gray-300 focus:ring-blue-500 focus:ring-2 transition-colors duration-200 ${
-                  isDarkMode ? "bg-gray-600" : "bg-gray-100"
-                }`}
-              />
-              <span className={`ml-3 text-sm font-medium transition-colors duration-200 ${
-                isDarkMode 
-                  ? "text-gray-300 group-hover:text-gray-100" 
-                  : "text-gray-700 group-hover:text-gray-900"
-              }`}>
-                Raw JSON
-              </span>
-            </label>
-          </div>
-          
-          {/* Show header summary if available */}
-          {parsedData?._headerInfo?.summary && (
-            <div className={`text-xs px-3 py-1 rounded-full transition-colors duration-200 ${
-              isDarkMode 
-                ? "bg-purple-900 text-purple-200 border border-purple-700" 
-                : "bg-purple-100 text-purple-800 border border-purple-200"
-            }`}>
-              Headers: {parsedData._headerInfo.summary.requestHeaderCount || 0} req, 
-              {parsedData._headerInfo.summary.responseHeaderCount || 0} resp
-            </div>
-          )}
+        {/* JSON content */}
+        <div className={`flex-1 min-h-0 ${isDarkMode ? "bg-gray-900" : "bg-gray-50"}`}>
+          <JsonContentView
+            data={responseData}
+            isDarkMode={isDarkMode}
+            defaultCollapsed={2}
+            emptyMessage="No data"
+          />
         </div>
       </div>
-      {/* Content */}
-      <div className={`flex-1 px-4 py-4 min-h-0 transition-colors duration-200 ${
-        isDarkMode ? "bg-gray-900" : "bg-gray-50"
-      }`}>
-        <div className={`rounded-lg border h-full flex flex-col transition-colors duration-200 ${
-          isDarkMode 
-            ? "bg-gray-800 border-gray-700" 
-            : "bg-white border-gray-200"
-        }`}>
-          {viewTree ? (
-            <div className="flex-1 min-h-0 p-4">
-              {/* Show empty state message for request views with no payload */}
-              {isRequestView && Object.keys(parsedData).length === 0 ? (
-                <div className={`h-full flex items-center justify-center text-center transition-colors duration-200 ${
-                  isDarkMode ? "text-gray-400" : "text-gray-500"
-                }`}>
-                  <div>
-                    <p className="text-lg mb-2">No Request Payload</p>
-                    <p className="text-sm">
-                      This request doesn't contain any payload data.<br/>
-                      {canRetriggerRequest && onEditRequest && (
-                        <>Use the <strong>Resend</strong> button to view technical details and re-trigger the request.</>
-                      )}
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                <div className="h-full overflow-auto" style={{ maxHeight: "100%" }}>
-                  <ReactJson
-                    src={
-                      typeof parsedData === "object" && Object.keys(parsedData).length > 0
-                        ? parsedData
-                        : { value: parsedData }
-                    }
-                    name={false}
-                    collapsed={parsedData?._headerInfo ? 1 : 2} // Less collapsed for headers
-                    enableClipboard={false}
-                    displayDataTypes={false}
-                    displayObjectSize={false}
-                    indentWidth={2}
-                    style={{
-                      fontSize: "0.75rem",
-                      fontFamily: "monospace, ui-monospace, SFMono-Regular, 'SF Mono', Monaco, Consolas, 'Liberation Mono', 'Menlo'",
-                      backgroundColor: "transparent",
-                      padding: "0",
-                      maxHeight: "100%",
-                      overflow: "visible",
-                    }}
-                    theme={
-                      isDarkMode
-                        ? {
-                            base00: "transparent", // editor background
-                            base01: "#374151", // lighter background
-                            base02: "#4b5563", // selection background
-                            base03: "#6b7280", // comments
-                            base04: "#9ca3af", // dark foreground
-                            base05: "#f3f4f6", // default foreground
-                            base06: "#f9fafb", // light foreground
-                            base07: "#ffffff", // lightest foreground
-                            base08: "#f87171", // red
-                            base09: "#fb923c", // orange
-                            base0A: "#fbbf24", // yellow
-                            base0B: "#34d399", // green
-                            base0C: "#22d3ee", // cyan
-                            base0D: "#60a5fa", // blue
-                            base0E: "#a78bfa", // purple
-                            base0F: "#9ca3af", // brown
-                          }
-                        : {
-                            base00: "transparent",
-                            base01: "#f8f9fa",
-                            base02: "#e9ecef",
-                            base03: "#6c757d",
-                            base04: "#495057",
-                            base05: "#212529",
-                            base06: "#212529",
-                            base07: "#000000",
-                            base08: "#dc3545",
-                            base09: "#fd7e14",
-                            base0A: "#ffc107",
-                            base0B: "#28a745",
-                            base0C: "#17a2b8",
-                            base0D: "#007bff",
-                            base0E: "#6f42c1",
-                            base0F: "#6c757d",
-                          }
-                    }
-                  />
-                </div>
-              )}
-            </div>
-          ) : (
-            <div
-              ref={rawJsonContainerRef}
-              className={`flex-1 m-4 font-mono text-sm leading-relaxed overflow-auto transition-colors duration-200 ${
-                isDarkMode ? "text-gray-200" : "text-gray-800"
-              }`}
-            >
-              {/* Show empty state message for request views with no payload */}
-              {isRequestView && Object.keys(parsedData).length === 0 ? (
-                <div className={`h-full flex items-center justify-center text-center transition-colors duration-200 ${
-                  isDarkMode ? "text-gray-400" : "text-gray-500"
-                }`}>
-                  <div>
-                    <p className="text-lg mb-2">No Request Payload</p>
-                    <p className="text-sm">
-                      This request doesn't contain any payload data.<br/>
-                      {canRetriggerRequest && onEditRequest && (
-                        <>Use the <strong>Resend</strong> button to view technical details and re-trigger the request.</>
-                      )}
-                    </p>
-                  </div>
-                </div>
-              ) : (
-                renderHighlightedJSON(formattedJSON)
-              )}
-            </div>
+    );
+  }
+
+  return (
+    <div className={`h-full flex flex-col shadow-lg transition-colors duration-200 ${isDarkMode ? "bg-gray-800" : "bg-white"}`}>
+      {/* Title bar */}
+      <div className={`flex-shrink-0 flex items-center justify-between px-2 py-1 border-b ${isDarkMode ? "bg-gray-800 border-gray-700" : "bg-white border-gray-200"}`}>
+        <span className={`text-xs font-semibold truncate ${isDarkMode ? "text-gray-100" : "text-gray-900"}`}>
+          {displayTitle}
+          {data?.status !== null && data?.status !== undefined && (
+            <span className={`ml-2 text-[11px] font-normal ${
+              data.status >= 400 ? (isDarkMode ? "text-red-400" : "text-red-600")
+                : data.status >= 300 ? (isDarkMode ? "text-yellow-400" : "text-yellow-600")
+                : (isDarkMode ? "text-green-400" : "text-green-600")
+            }`}>
+              {data.status}
+            </span>
           )}
+        </span>
+        <div className="flex items-center gap-1.5">
+          {canResend && onEditRequest && (
+            <button
+              onClick={() => {
+                const enhancedData = {
+                  ...data.requestPayload,
+                  url: finalUrl || data.requestPayload?._url,
+                  _resendUrl: finalUrl || data.requestPayload?._url,
+                };
+                onEditRequest(enhancedData, data.method || data.requestPayload?._method || "HTTP Request");
+              }}
+              className={`px-1.5 py-0.5 text-[11px] font-medium text-white rounded ${isDarkMode ? "bg-green-700 hover:bg-green-600" : "bg-green-600 hover:bg-green-700"}`}
+            >
+              Resend
+            </button>
+          )}
+          <button
+            onClick={() => {
+              let copyData = data;
+              if (activeTab === "payload") copyData = payloadData;
+              else if (activeTab === "preview" || activeTab === "response") copyData = responseData;
+              else if (activeTab === "headers") copyData = data.headers;
+              navigator.clipboard?.writeText(JSON.stringify(copyData, null, 2)).catch(() => {});
+            }}
+            className={`p-1 rounded ${isDarkMode ? "text-gray-400 hover:text-gray-200 hover:bg-gray-700" : "text-gray-400 hover:text-gray-600 hover:bg-gray-100"}`}
+            title="Copy"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+            </svg>
+          </button>
+          <button
+            onClick={onClose}
+            className={`p-1 rounded ${isDarkMode ? "text-gray-400 hover:text-gray-200 hover:bg-gray-700" : "text-gray-400 hover:text-gray-600 hover:bg-gray-100"}`}
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+            </svg>
+          </button>
         </div>
+      </div>
+
+      {/* Chrome-style tab bar */}
+      <div className={`flex-shrink-0 flex border-b ${isDarkMode ? "border-gray-700 bg-gray-800" : "border-gray-200 bg-white"}`}>
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`px-3 py-1.5 text-[11px] font-medium border-b-2 transition-colors ${
+              activeTab === tab.id
+                ? isDarkMode
+                  ? "text-blue-400 border-blue-400"
+                  : "text-blue-600 border-blue-600"
+                : isDarkMode
+                ? "text-gray-400 border-transparent hover:text-gray-200 hover:border-gray-500"
+                : "text-gray-500 border-transparent hover:text-gray-700 hover:border-gray-300"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab content */}
+      <div className={`flex-1 min-h-0 ${isDarkMode ? "bg-gray-900" : "bg-gray-50"}`}>
+        {activeTab === "headers" && (
+          <HeadersView data={data} isDarkMode={isDarkMode} />
+        )}
+
+        {activeTab === "payload" && isHttp && (
+          <JsonContentView
+            data={payloadData}
+            isDarkMode={isDarkMode}
+            defaultCollapsed={1}
+            emptyMessage="No request payload"
+          />
+        )}
+
+        {activeTab === "preview" && (
+          <JsonContentView
+            data={responseData}
+            isDarkMode={isDarkMode}
+            defaultCollapsed={2}
+            emptyMessage="No preview available"
+          />
+        )}
+
+        {activeTab === "response" && (
+          <JsonContentView
+            data={responseData}
+            isDarkMode={isDarkMode}
+            defaultCollapsed={2}
+            emptyMessage="No response data"
+          />
+        )}
       </div>
     </div>
   );

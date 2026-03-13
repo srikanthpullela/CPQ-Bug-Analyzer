@@ -822,6 +822,155 @@ The extension comes with pre-configured patterns for:
 - **Search Scope**: Search applies to all captured data including nested objects
 - **Pattern Management**: Add, edit, or remove URL patterns via settings modal
 
+## 🔧 Troubleshooting
+
+### Common Issues and Solutions
+
+#### ❌ "Cannot access a chrome-extension:// URL of different extension"
+
+**Problem**: This error occurs when another Chrome extension is already using the debugger API.
+
+**Solutions** (try in order):
+1. **Close conflicting extensions**:
+   - Disable other debugging/developer extensions temporarily
+   - Common conflicts: React DevTools, Redux DevTools, other network monitoring extensions
+   
+2. **Restart Chrome process**:
+   ```bash
+   # Close all Chrome windows and restart
+   # Or use Chrome Task Manager (Shift+Esc) to end Chrome processes
+   ```
+
+3. **Use a fresh Chrome profile**:
+   - Create a new Chrome profile specifically for development
+   - Install only essential extensions in the new profile
+
+4. **Check extension load order**:
+   - Load this extension first before other debugging tools
+   - Reload this extension if it was loaded after conflicting ones
+
+#### ⚠️ Debugger Connection Issues
+
+**Symptoms**: "Reconnect WS" button appears, no network data captured
+
+**Solutions**:
+1. **Manual reconnection**: Click the "Reconnect WS" button in the header
+2. **Refresh target page**: Reload the page you're debugging
+3. **Restart DevTools**: Close and reopen Chrome DevTools
+4. **Extension reload**: Reload the extension in chrome://extensions/
+
+#### 🚫 Permission Errors
+
+**Problem**: "Permission denied" or similar access errors
+
+**Solutions**:
+1. **Check extension permissions**:
+   - Go to chrome://extensions/
+   - Find "Conga Bug Analyzer"
+   - Ensure "Allow access to file URLs" is enabled (if needed)
+   
+2. **Verify manifest permissions**:
+   ```json
+   {
+     "permissions": ["tabs", "debugger", "storage"],
+     "host_permissions": ["<all_urls>"]
+   }
+   ```
+
+3. **Reload extension after permission changes**
+
+#### 🔄 Extension Not Loading
+
+**Problem**: Extension appears in DevTools but panel is blank or broken
+
+**Solutions**:
+1. **Check console errors**:
+   - Open DevTools for DevTools: Ctrl+Shift+I on DevTools window
+   - Look for JavaScript errors in console
+   
+2. **Clear extension data**:
+   ```javascript
+   // In DevTools console, clear storage:
+   localStorage.clear();
+   ```
+
+3. **Rebuild from source**:
+   ```bash
+   npm run build
+   # Then reload extension
+   ```
+
+#### 📡 Network Data Not Appearing
+
+**Problem**: Extension loads but no network requests are captured
+
+**Solutions**:
+1. **Verify URL patterns**:
+   - Click the Settings (⚙️) button in header
+   - Ensure URL patterns match your target APIs
+   - Default patterns: "apexremote", "congacloud"
+
+2. **Check network activity**:
+   - Ensure the target page is making matching API calls
+   - Look in Chrome DevTools Network tab to verify requests exist
+
+3. **Pattern troubleshooting**:
+   ```javascript
+   // Check current patterns in DevTools console:
+   console.log(localStorage.getItem('har_extractor_url_patterns'));
+   ```
+
+#### 🎨 UI/Display Issues
+
+**Problem**: Dark mode not working, layout broken, buttons not responding
+
+**Solutions**:
+1. **Theme reset**:
+   - Toggle dark/light mode button multiple times
+   - Check browser zoom level (should be 100%)
+
+2. **CSS conflicts**:
+   - Ensure no other extensions modify DevTools styling
+   - Check for browser-level custom CSS
+
+3. **Component refresh**:
+   - Refresh the DevTools panel
+   - Resize the DevTools window
+
+### Debug Mode
+
+Enable verbose logging for troubleshooting:
+
+1. **Open DevTools for DevTools**: 
+   - With DevTools open, press Ctrl+Shift+I (Windows/Linux) or Cmd+Option+I (Mac)
+
+2. **Enable verbose console logging**:
+   ```javascript
+   // In the DevTools-for-DevTools console:
+   localStorage.setItem('har_extractor_debug', 'true');
+   ```
+
+3. **Monitor console output**:
+   - Look for messages prefixed with emojis: 🔌, 📤, 🔄, etc.
+   - These indicate debugger connection, message passing, and reload events
+
+### Getting Help
+
+**Before reporting issues**:
+1. Check this troubleshooting section
+2. Try solutions in the order listed
+3. Gather the following information:
+   - Chrome version: `chrome://version/`
+   - Extension version: Check chrome://extensions/
+   - Console errors: From DevTools-for-DevTools
+   - Steps to reproduce the issue
+
+**Reporting bugs**:
+1. Open GitHub Issues: [Create New Issue](https://github.com/spullela-conga/CPQ-Bug-Analyzer/issues)
+2. Use the bug report template
+3. Include all gathered information
+4. Attach screenshots if UI-related
+
 ## Contributing
 
 1. Fork the repository
