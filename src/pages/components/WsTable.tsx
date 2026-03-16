@@ -9,6 +9,7 @@ export interface WsRow {
   timestamp?: number;
   direction?: "sent" | "received";
   id?: string;
+  duration?: string;
 }
 
 interface Props {
@@ -125,7 +126,12 @@ export const WsTable: React.FC<Props> = ({
                   }}
                 >
                   <td className="px-1 py-0.5 text-xs text-gray-700 w-0 whitespace-nowrap">{i + 1}</td>
-                  <td className="px-1 py-0.5 text-xs text-gray-700 w-0 whitespace-nowrap">{w.time}</td>
+                  <td className="px-1 py-0.5 text-xs text-gray-700 w-0 whitespace-nowrap">
+                    {w.time}
+                    {w.duration && (
+                      <span className="ml-1 text-[10px] text-orange-600 font-medium">({w.duration})</span>
+                    )}
+                  </td>
                   <td className="px-2 py-0.5 text-xs text-gray-700 break-all">
                     <div className="truncate max-w-xs" title={w.endpoint}>{w.endpoint}</div>
                   </td>

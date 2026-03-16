@@ -1,6 +1,15 @@
 import { useState, useEffect } from "react";
 import { v4 as uuidv4 } from "uuid";
 
+function formatDuration(ms: number): string {
+  if (ms < 0) return "";
+  const totalSeconds = Math.round(ms / 1000);
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+}
+
 // Declare chrome API for TypeScript
 declare const chrome: any;
 
@@ -80,6 +89,7 @@ export interface WsRow {
   time: string;
   timestamp: number; // <-- Needed for proper sorting
   direction: "sent" | "received";
+  duration?: string; // e.g. "20s", "1m 5s" — only on received rows
 }
 
 export function useLiveHar() {
@@ -288,18 +298,33 @@ export function useLiveHar() {
               timeZone: "Asia/Kolkata",
             });
 
-            setWsRows((prev) => [
-              ...prev,
-              {
-                endpoint,
-                action,
-                payload: payload.payload,
-                status: payload.status ?? null,
-                time,
-                timestamp: tsMs,
-                direction,
-              },
-            ]);
+            setWsRows((prev) => {
+              // Calculate duration for received messages by finding matching sent TaskId
+              let duration: string | undefined = payload.duration;
+              const taskId = payload.payload?.TaskId;
+              if (taskId && direction === "received" && !duration) {
+                const sentRow = [...prev].reverse().find(
+                  (r) => r.direction === "sent" && r.payload?.TaskId === taskId
+                );
+                if (sentRow) {
+                  duration = formatDuration(tsMs - sentRow.timestamp);
+                }
+              }
+
+              return [
+                ...prev,
+                {
+                  endpoint,
+                  action,
+                  payload: payload.payload,
+                  status: payload.status ?? null,
+                  time,
+                  timestamp: tsMs,
+                  direction,
+                  duration,
+                },
+              ];
+            });
           } catch (err) {
             console.warn("[useLiveHar] Failed to process WS row:", err);
           }

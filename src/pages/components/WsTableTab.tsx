@@ -10,6 +10,7 @@ export interface WsRow {
   timestamp?: number;
   direction?: "sent" | "received";
   id?: string;
+  duration?: string;
   // Add header support for WebSocket connections
   headers?: {
     request?: any[];
@@ -318,6 +319,11 @@ export const WsTableTab: React.FC<Props> = ({
                   }`}
                 >
                   {w.time}
+                  {w.duration && (
+                    <span className={`ml-1 text-[10px] font-medium ${
+                      isDarkMode ? "text-orange-400" : "text-orange-600"
+                    }`}>({w.duration})</span>
+                  )}
                 </td>
 
                 <td

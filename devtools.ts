@@ -2,6 +2,8 @@
 
 const seenRequests = new Set<string>();
 const seenWsMessages = new Set<string>();
+// Track sent WS timestamps by TaskId for duration calculation
+const wsSentTimestamps: Record<string, number> = {};
 let debuggerAttached = false;
 let wsFirstTimestamp: number | null = null;
 let wsFirstWallClock: number | null = null;
@@ -25,6 +27,7 @@ let wsPollingInterval: ReturnType<typeof setInterval> | null = null;
 let debuggerWsActive = false;
 let onNavigatedListenerAdded = false;
 let currentPanelWindow: any = null;
+let debuggerRetryInterval: ReturnType<typeof setInterval> | null = null;
 
 const WS_INTERCEPTOR_SCRIPT = `
 (function() {
@@ -114,6 +117,61 @@ function stopWsPolling() {
   }
 }
 
+function stopDebuggerRetry() {
+  if (debuggerRetryInterval) {
+    clearInterval(debuggerRetryInterval);
+    debuggerRetryInterval = null;
+  }
+}
+
+// Auto-retry debugger attachment when it fails or is detached by another extension
+function startDebuggerRetry(debuggee: any, panelWindow: any) {
+  stopDebuggerRetry();
+  console.log("🔄 Starting debugger auto-retry (every 10s)...");
+  debuggerRetryInterval = setInterval(() => {
+    if (debuggerAttached) {
+      // Already attached, stop retrying
+      stopDebuggerRetry();
+      return;
+    }
+    console.log("🔄 Auto-retry: attempting debugger attach...");
+    try {
+      chrome.debugger.attach(debuggee, "1.3", () => {
+        if (chrome.runtime.lastError) {
+          console.log("🔄 Auto-retry: still blocked -", chrome.runtime.lastError.message);
+          return;
+        }
+        console.log("✅ Auto-retry: debugger attached successfully!");
+        debuggerAttached = true;
+        stopDebuggerRetry();
+
+        try {
+          chrome.debugger.sendCommand(debuggee, "Network.enable", {
+            maxTotalBufferSize: 100_000_000,
+            maxResourceBufferSize: 50_000_000,
+          });
+          chrome.debugger.sendCommand(debuggee, "Network.setCacheDisabled", { cacheDisabled: true });
+          chrome.debugger.sendCommand(debuggee, "Page.enable", {});
+          chrome.debugger.sendCommand(debuggee, "Target.setAutoAttach", {
+            autoAttach: true,
+            waitForDebuggerOnStart: false,
+            flatten: true,
+          });
+        } catch (e) {
+          console.warn("⚠️ Auto-retry: error enabling domains:", (e as any)?.message || e);
+        }
+
+        panelWindow.postMessage(
+          { source: "HAR_EXTRACTOR", type: "DEBUGGER_RECONNECTED" },
+          "*"
+        );
+      });
+    } catch (e) {
+      console.log("🔄 Auto-retry: attach threw:", (e as any)?.message || e);
+    }
+  }, 10_000);
+}
+
 function processInterceptedWsMessage(msg: any, panelWindow: any) {
   if (!panelWindow) return;
   if (msg.direction === 'open') {
@@ -156,17 +214,40 @@ function processInterceptedWsMessage(msg: any, panelWindow: any) {
   seenWsMessages.add(key);
   if (seenWsMessages.size > 10000) seenWsMessages.clear();
 
+  // Calculate duration between sent and received using TaskId
+  const taskId = topLevel.TaskId;
+  let duration: string | undefined;
+  if (taskId) {
+    if (msg.direction === 'sent') {
+      wsSentTimestamps[taskId] = msg.timestamp;
+    } else {
+      const sentTs = wsSentTimestamps[taskId];
+      if (sentTs) {
+        const diffMs = msg.timestamp - sentTs;
+        const totalSec = Math.round(diffMs / 1000);
+        if (totalSec < 60) {
+          duration = `${totalSec}s`;
+        } else {
+          const min = Math.floor(totalSec / 60);
+          const sec = totalSec % 60;
+          duration = sec > 0 ? `${min}m ${sec}s` : `${min}m`;
+        }
+      }
+    }
+  }
+
   panelWindow.postMessage({
     source: "HAR_EXTRACTOR",
     type: "WS",
     payload: {
       endpoint,
       action,
-      payload: nested || topLevel,
+      payload: topLevel,
       status,
       direction: msg.direction,
       timestamp: msg.timestamp,
       time: timestamp.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+      duration,
     },
   }, "*");
 }
@@ -390,7 +471,7 @@ function getPatternHash(patterns: UrlPattern[]): string {
   return JSON.stringify(patterns.map(p => ({ name: p.name, pattern: p.pattern, enabled: p.enabled })));
 }
 
-chrome.devtools.panels.create("Conga Debugger", "", "panel.html", (panel) => {
+chrome.devtools.panels.create("Conga Debugger", "", "panel.html", (panel: any) => {
   let currentTabId: number | null = null;
   // Track pending network requests for loading state
   let pendingNetworkRequests = new Set<string>();
@@ -409,7 +490,7 @@ chrome.devtools.panels.create("Conga Debugger", "", "panel.html", (panel) => {
     );
   }
 
-  panel.onShown.addListener((panelWindow) => {
+  panel.onShown.addListener((panelWindow: any) => {
     const tabId = chrome.devtools.inspectedWindow.tabId;
     currentTabId = tabId;
     const debuggee = { tabId };
@@ -624,9 +705,13 @@ chrome.devtools.panels.create("Conga Debugger", "", "panel.html", (panel) => {
             },
             "*"
           );
+
+          // Start auto-retry: keep trying to attach in case the other extension releases the debugger
+          startDebuggerRetry(debuggee, panelWindow);
           return;
         }
         debuggerAttached = true;
+        stopDebuggerRetry(); // No need to retry, we're attached
         console.log("✅ Debugger attached successfully to tab:", currentTabId);
 
         try {
@@ -680,12 +765,19 @@ chrome.devtools.panels.create("Conga Debugger", "", "panel.html", (panel) => {
         if (detachedDebuggee.tabId === currentTabId) {
           console.warn("🔌 Debugger detached:", reason);
           debuggerAttached = false;
-          
+
           // Notify panel that debugger was disconnected
           panelWindow.postMessage(
             { source: "HAR_EXTRACTOR", type: "DEBUGGER_DISCONNECTED" },
             "*"
           );
+
+          // Activate WS interceptor fallback immediately
+          debuggerWsActive = false;
+          injectWsInterceptor();
+
+          // Auto-retry debugger attachment every 10 seconds
+          startDebuggerRetry(debuggee, panelWindow);
         }
       });
     }
@@ -712,6 +804,8 @@ chrome.devtools.panels.create("Conga Debugger", "", "panel.html", (panel) => {
         setTimeout(() => injectWsInterceptor(), 100);
         // Double-inject after 500ms as safety net for slow-loading pages
         setTimeout(() => injectWsInterceptor(), 500);
+        // Third inject at 1.5s for very slow pages
+        setTimeout(() => injectWsInterceptor(), 1500);
 
         // Clear tables on navigation if debugger isn't attached
         // (since Page.frameNavigated won't fire without debugger)
@@ -722,11 +816,136 @@ chrome.devtools.panels.create("Conga Debugger", "", "panel.html", (panel) => {
             "*"
           );
         }
+
+        // On navigation, the debugger detaches. Try to re-attach since the
+        // conflicting extension may not re-attach immediately after navigation.
+        if (!debuggerAttached) {
+          setTimeout(() => {
+            if (!debuggerAttached) {
+              console.log("🔄 Post-navigation: attempting debugger attach...");
+              try {
+                chrome.debugger.attach(debuggee, "1.3", () => {
+                  if (chrome.runtime.lastError) {
+                    console.log("🔄 Post-navigation attach failed:", chrome.runtime.lastError.message);
+                    // Keep the periodic retry going
+                    startDebuggerRetry(debuggee, panelWindow);
+                    return;
+                  }
+                  console.log("✅ Post-navigation: debugger attached!");
+                  debuggerAttached = true;
+                  stopDebuggerRetry();
+                  try {
+                    chrome.debugger.sendCommand(debuggee, "Network.enable", {
+                      maxTotalBufferSize: 100_000_000,
+                      maxResourceBufferSize: 50_000_000,
+                    });
+                    chrome.debugger.sendCommand(debuggee, "Page.enable", {});
+                    chrome.debugger.sendCommand(debuggee, "Target.setAutoAttach", {
+                      autoAttach: true,
+                      waitForDebuggerOnStart: false,
+                      flatten: true,
+                    });
+                  } catch {}
+                  panelWindow.postMessage(
+                    { source: "HAR_EXTRACTOR", type: "DEBUGGER_RECONNECTED" },
+                    "*"
+                  );
+                });
+              } catch {}
+            }
+          }, 500);
+        }
       });
       onNavigatedListenerAdded = true;
     }
 
-    function handleEvent(source, method, params) {
+    // ========================
+    // LIVE HTTP FALLBACK via onRequestFinished
+    // ========================
+    // This API works WITHOUT the chrome.debugger, providing live HTTP capture
+    // even when another extension blocks debugger attachment. It's the primary
+    // mechanism ensuring HTTP calls always show up regardless of conflicts.
+    if (chrome.devtools?.network?.onRequestFinished) {
+      chrome.devtools.network.onRequestFinished.addListener((request: any) => {
+        const url = request.request?.url;
+        if (!url) return;
+
+        const matchedPattern = shouldProcessUrl(url);
+        if (!matchedPattern) return;
+
+        // Deduplicate using request URL + start time
+        const rid = `orf-${url}-${request.startedDateTime}`;
+        if (seenRequests.has(rid)) return;
+        seenRequests.add(rid);
+
+        const timestamp = new Date(request.startedDateTime);
+        const startTime = timestamp.getTime();
+        const totalTimeMs = request.time || 0;
+        const endTime = startTime + totalTimeMs;
+
+        request.getContent((content: string) => {
+          let req: any = {};
+          let res: any = {};
+
+          try {
+            req = JSON.parse(request.request.postData?.text || "{}");
+          } catch {
+            req = {
+              _method: request.request.method,
+              _url: url,
+              _headers: request.request.headers || [],
+              _rawPostData: request.request.postData?.text || "",
+            };
+          }
+
+          if (content && content.trim()) {
+            try {
+              res = JSON.parse(content);
+            } catch {
+              res = { _rawContent: content };
+            }
+          } else {
+            res = { _empty: true, _status: request.response?.status };
+          }
+
+          const processedPayload = processRequestByPattern(
+            {
+              request: request.request,
+              response: request.response,
+              startedDateTime: request.startedDateTime,
+            },
+            req,
+            res,
+            matchedPattern
+          );
+
+          panelWindow.postMessage(
+            {
+              source: "HAR_EXTRACTOR",
+              type: "INITIAL_HTTP_REQUEST",
+              payload: {
+                ...processedPayload,
+                timestamp: startTime,
+                baseUrl: (() => { try { return new URL(url).origin; } catch { return ""; } })(),
+                endTime,
+                hasMessages: (request.response?.status || 0) >= 400,
+                isCompleted: true,
+                requestHeaders: request.request.headers || [],
+                responseHeaders: request.response?.headers || [],
+                headers: {
+                  request: request.request.headers || [],
+                  response: request.response?.headers || [],
+                },
+              },
+            },
+            "*"
+          );
+        });
+      });
+      console.log("✅ onRequestFinished listener registered (works without debugger)");
+    }
+
+    function handleEvent(source: any, method: any, params: any) {
       // Unwrap child-target events if flatten is false or not supported
       if (method === "Target.receivedMessageFromTarget" && params?.message) {
         try {
@@ -1040,7 +1259,7 @@ chrome.devtools.panels.create("Conga Debugger", "", "panel.html", (panel) => {
         const wsPayload = {
           endpoint,
           action,
-          payload: nested || topLevel,
+          payload: topLevel,
           status,
           direction,
           timestamp: timestamp.getTime(),
@@ -1049,7 +1268,29 @@ chrome.devtools.panels.create("Conga Debugger", "", "panel.html", (panel) => {
             minute: "2-digit",
             second: "2-digit",
           }),
+          duration: undefined as string | undefined,
         };
+
+        // Calculate duration between sent and received using TaskId
+        const taskId = topLevel.TaskId;
+        if (taskId) {
+          if (direction === "sent") {
+            wsSentTimestamps[taskId] = timestamp.getTime();
+          } else {
+            const sentTs = wsSentTimestamps[taskId];
+            if (sentTs) {
+              const diffMs = timestamp.getTime() - sentTs;
+              const totalSec = Math.round(diffMs / 1000);
+              if (totalSec < 60) {
+                wsPayload.duration = `${totalSec}s`;
+              } else {
+                const min = Math.floor(totalSec / 60);
+                const sec = totalSec % 60;
+                wsPayload.duration = sec > 0 ? `${min}m ${sec}s` : `${min}m`;
+              }
+            }
+          }
+        }
 
         panelWindow.postMessage(
           {
@@ -1135,14 +1376,14 @@ chrome.devtools.panels.create("Conga Debugger", "", "panel.html", (panel) => {
       if (periodicReloadInterval) clearInterval(periodicReloadInterval);
       periodicReloadInterval = setInterval(() => {
         if (chrome?.devtools?.network?.getHAR) {
-          chrome.devtools.network.getHAR((harLog) => {
+          chrome.devtools.network.getHAR((harLog: any) => {
             const currentEntryCount = harLog.entries?.length || 0;
 
             // Count completed requests (non-zero status or finished)
             let completedCount = 0;
             let newPendingIds = new Set<string>();
 
-            harLog.entries?.forEach(entry => {
+            harLog.entries?.forEach((entry: any) => {
               const requestId = (entry as any).requestId || (entry as any)._requestId || entry.request.url;
               const isCompleted = entry.response?.status && entry.response.status > 0;
               const hasTimings = entry.timings && entry.timings.receive >= 0;
@@ -1187,12 +1428,13 @@ chrome.devtools.panels.create("Conga Debugger", "", "panel.html", (panel) => {
     panel.onHidden.addListener(() => {
       stopPeriodicReload();
       stopWsPolling();
+      stopDebuggerRetry();
     });
 
     function sendInitialHar() {
       if (!chrome.devtools.network.getHAR) return;
 
-      chrome.devtools.network.getHAR((harLog) => {
+      chrome.devtools.network.getHAR((harLog: any) => {
         // Always get fresh patterns from localStorage for each reload
         const currentPatterns = getUrlPatternsFromStorage();
         const currentPatternHash = getPatternHash(currentPatterns);
@@ -1225,7 +1467,7 @@ chrome.devtools.panels.create("Conga Debugger", "", "panel.html", (panel) => {
           const totalTimeMs = entry.time || 0;
           const endTime = startTime + totalTimeMs;
 
-          entry.getContent((content) => {
+          entry.getContent((content: any) => {
             let req = {};
             let res = {};
             
@@ -1324,7 +1566,7 @@ chrome.devtools.panels.create("Conga Debugger", "", "panel.html", (panel) => {
     panelWindow.postMessage({ source: "HAR_EXTRACTOR", type: "INIT" }, "*");
 
     // Listen for messages from the panel window (React app)
-    const handlePanelMessage = (event) => {
+    const handlePanelMessage = (event: any) => {
       if (event.data?.source !== "HAR_EXTRACTOR") return;
 
       console.log("🔌 DevTools received message:", event.data.type);
@@ -1386,7 +1628,7 @@ chrome.devtools.panels.create("Conga Debugger", "", "panel.html", (panel) => {
         if (event.data.patterns && Array.isArray(event.data.patterns)) {
           try {
             // Use the same validation and save approach as UrlPatternSettings.tsx
-            const patternsToSave = event.data.patterns.map(p => ({
+            const patternsToSave = event.data.patterns.map((p: any) => ({
               name: p.name || 'Unnamed Pattern',
               pattern: p.pattern || '',
               type: p.type || 'generic',
@@ -1429,7 +1671,7 @@ chrome.devtools.panels.create("Conga Debugger", "", "panel.html", (panel) => {
                 source: "HAR_EXTRACTOR", 
                 type: "URL_PATTERNS_SAVED",
                 success: false,
-                error: error.message
+                error: (error as any)?.message
               },
               "*"
             );
@@ -1464,7 +1706,7 @@ chrome.devtools.panels.create("Conga Debugger", "", "panel.html", (panel) => {
                   resolve(true);
                 });
               } catch (error) {
-                console.log("🔌 Graceful detach failed:", error.message);
+                console.log("🔌 Graceful detach failed:", (error as any)?.message);
                 resolve(false);
               }
             });
@@ -1476,7 +1718,7 @@ chrome.devtools.panels.create("Conga Debugger", "", "panel.html", (panel) => {
               chrome.debugger.detach(debuggee);
               console.log("🔌 Force detach completed");
             } catch (error) {
-              console.log("🔌 Force detach failed (expected):", error.message);
+              console.log("🔌 Force detach failed (expected):", (error as any)?.message);
             }
           };
 
@@ -1571,7 +1813,7 @@ chrome.devtools.panels.create("Conga Debugger", "", "panel.html", (panel) => {
                 
                 console.log("✅ Windows Chrome state cleanup completed");
               } catch (error) {
-                console.warn("⚠️ State cleanup failed:", error.message);
+                console.warn("⚠️ State cleanup failed:", (error as any)?.message);
               }
             }
             

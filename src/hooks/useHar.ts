@@ -3,6 +3,15 @@ import { useState, useEffect } from "react";
 import { hasHttpPageMessages, hasWsErrorDetails } from "../utils/errorHandler";
 import { v4 as uuidv4 } from "uuid";
 
+function formatDuration(ms: number): string {
+  if (ms < 0) return "";
+  const totalSeconds = Math.round(ms / 1000);
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+}
+
 export interface HttpRow {
   method: string;
   requestPayload: any;
@@ -30,6 +39,7 @@ export interface WsRow {
   status: number | null;
   time: string; // formatted HH:MM:SS display
   timestamp: number; // raw ms epoch, for sorting
+  duration?: string; // e.g. "20s", "1m 5s" — only on received rows
 }
 
 export function useHar() {
@@ -236,6 +246,8 @@ export function useHar() {
     // …and your WS‐logic stays the same…
     const ws: WsRow[] = [];
     let base = "";
+    // Track sent timestamps by TaskId for duration calculation
+    const sentTimestamps: Record<string, number> = {};
     entries.forEach((ent) => {
       if (!base && /^wss?:\/\//.test(ent.request.url)) {
         base = ent.request.url.split("?")[0];
@@ -255,21 +267,37 @@ export function useHar() {
             ? `TaskId: ${obj.TaskId}`
             : base;
           const action = obj.Action || "";
-          const time =
-            typeof frame.time === "number"
-              ? formatTime(new Date(frame.time * 1000))
-              : "–";
           const timeMs =
             typeof frame.time === "number" ? frame.time * 1000 : Date.now();
           const timeStr = formatTime(new Date(timeMs));
           const hasErrors = hasWsErrorDetails(frame.data);
+
+          // Determine direction from HAR frame type
+          const direction: "sent" | "received" =
+            frame.type === "send" || frame.type === "sent" ? "sent" : "received";
+
+          // Track sent timestamps and calculate duration for received
+          const taskId = obj.TaskId;
+          let duration: string | undefined;
+          if (taskId) {
+            if (direction === "sent") {
+              sentTimestamps[taskId] = timeMs;
+            } else {
+              const sentTs = sentTimestamps[taskId];
+              if (sentTs) {
+                duration = formatDuration(timeMs - sentTs);
+              }
+            }
+          }
+
           ws.push({
             endpoint,
             action,
             payload: obj,
             status,
-            time: timeStr, // display version
-            timestamp: timeMs, // raw epoch for sorting
+            time: timeStr,
+            timestamp: timeMs,
+            duration,
           });
         } catch {}
       });
@@ -321,8 +349,9 @@ export function useHar() {
             action: payload.action,
             payload: payload.payload,
             status: payload.status,
-            time: payload.time, // pre-formatted by devtools.ts
-            timestamp: payload.timestamp, // raw ms epoch
+            time: payload.time,
+            timestamp: payload.timestamp,
+            duration: payload.duration,
           },
         ]);
       }

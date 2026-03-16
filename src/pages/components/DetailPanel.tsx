@@ -472,17 +472,32 @@ export const DetailPanel: React.FC<Props> = ({
     ];
   }, [isWs]);
 
-  // Only reset tab when switching between row types (HTTP <-> WS)
+  // Persist the user's last-selected tab per row type (HTTP vs WS)
   const prevRowType = useRef<string | undefined>();
+  const savedTabPerType = useRef<Record<string, string>>({});
   useEffect(() => {
     if (data) {
       const currentType = data._rowType;
       if (prevRowType.current !== currentType) {
-        setActiveTab(isWs ? "response" : "headers");
+        // Switching row types — restore saved tab or use default
+        const saved = savedTabPerType.current[currentType];
+        const validTabs = isWs ? ["response", "headers"] : ["headers", "payload", "preview", "response"];
+        if (saved && validTabs.includes(saved)) {
+          setActiveTab(saved);
+        } else {
+          setActiveTab(isWs ? "response" : "headers");
+        }
         prevRowType.current = currentType;
       }
     }
   }, [data, isWs]);
+
+  // Save the active tab whenever the user changes it
+  useEffect(() => {
+    if (prevRowType.current) {
+      savedTabPerType.current[prevRowType.current] = activeTab;
+    }
+  }, [activeTab]);
 
   const payloadData = useMemo(() => {
     if (isHttp) {
