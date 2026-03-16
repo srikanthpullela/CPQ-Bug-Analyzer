@@ -48,6 +48,7 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
   const [debuggerConnected, setDebuggerConnected] = useState(true);
   const [isReconnecting, setIsReconnecting] = useState(false);
   const [debuggerError, setDebuggerError] = useState<string | null>(null);
+  const [interceptorMode, setInterceptorMode] = useState(false);
   const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
@@ -58,13 +59,20 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
         if (event.data.type === "DEBUGGER_DISCONNECTED") {
           console.log("🔌 Setting debugger as disconnected");
           setDebuggerConnected(false);
-          setDebuggerError(null); // Clear any previous errors
+          setInterceptorMode(false);
+          setDebuggerError(null);
+        } else if (event.data.type === "DEBUGGER_FALLBACK") {
+          console.log("🔌 Debugger fallback - WS interceptor active");
+          setDebuggerConnected(false);
+          setInterceptorMode(true);
+          setIsReconnecting(false);
+          setDebuggerError(null);
         } else if (event.data.type === "DEBUGGER_RECONNECTED") {
           console.log("🔌 Setting debugger as reconnected");
           setDebuggerConnected(true);
+          setInterceptorMode(false);
           setIsReconnecting(false);
-          setDebuggerError(null); // Clear any errors on successful connection
-          // Clear any pending timeout
+          setDebuggerError(null);
           if (reconnectTimeoutRef.current) {
             clearTimeout(reconnectTimeoutRef.current);
             reconnectTimeoutRef.current = null;
@@ -125,13 +133,10 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
     >
       <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-2">
-          <h1
-            className={`text-sm font-semibold transition-colors duration-100 ${
-              isDarkMode ? "text-white" : "text-gray-900"
-            }`}
-          >
-            Network Calls
-          </h1>
+          <svg width="16" height="16" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+            <rect width="128" height="128" fill="#1a1145" />
+            <text x="64" y="96" textAnchor="middle" fontSize="100" fontWeight="bold" fill="#7c6cf0" fontFamily="Arial, Helvetica, sans-serif">C</text>
+          </svg>
           <div className="flex items-center gap-1.5 text-xs">
             <span
               className={`px-1.5 py-0.5 rounded-full font-medium text-align-center transition-colors duration-75 ${
@@ -162,10 +167,10 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
             </span>
             {searchTerm && (
               <span
-                className={`px-1.5 py-0.5 rounded-full font-medium text-align-center transition-colors duration-75 ${
+                className={`px-1.5 py-0.5 rounded-full font-bold text-align-center animate-pulse ${
                   isDarkMode
-                    ? "bg-orange-900 text-orange-200"
-                    : "bg-orange-100 text-orange-800"
+                    ? "bg-red-800 text-red-100 ring-1 ring-red-600"
+                    : "bg-red-500 text-white ring-1 ring-red-400"
                 }`}
               >
                 Filtered: {filteredHttpCount + filteredWsCount}
@@ -174,7 +179,7 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {!debuggerConnected && (
+          {!debuggerConnected && !interceptorMode && (
             <div className="flex items-center gap-2">
               {debuggerError && debuggerError.includes("different extension") && (
                 <div className={`px-3 py-1 rounded-md text-xs font-medium border ${
@@ -207,6 +212,15 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
                   {isReconnecting ? "" : ""}
                 </span>
               </button>
+            </div>
+          )}
+          {interceptorMode && (
+            <div className={`px-2 py-0.5 rounded-md text-xs font-medium ${
+              isDarkMode 
+                ? "bg-amber-900 text-amber-200" 
+                : "bg-amber-100 text-amber-800"
+            }`} title="Debugger unavailable (extension conflict). WS interceptor is capturing WebSocket traffic. Reload the page to start capturing.">
+              ⚡ WS Interceptor
             </div>
           )}
           
@@ -319,20 +333,12 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
           </button>
         </div>
       </div>
-      <div
-        className={`relative transition-colors duration-75 ${
-          isDarkMode ? "search-input-dark" : "search-input-light"
-        }`}
-      >
-        <div
-          className={`absolute inset-0 rounded-lg pointer-events-none transition-colors duration-75`}
-        ></div>
-        <SearchInput
-          value={searchTerm}
-          onChange={setSearchTerm}
-          placeholder="🔍 Search requests, responses, headers, or any field value..."
-        />
-      </div>
+      <SearchInput
+        value={searchTerm}
+        onChange={setSearchTerm}
+        isDarkMode={isDarkMode}
+        placeholder="Search requests, responses, headers…"
+      />
     </div>
   );
 };

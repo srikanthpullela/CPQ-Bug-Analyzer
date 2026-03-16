@@ -241,7 +241,7 @@ const HarMethodsTabPage: React.FC = () => {
         leftPanel={
           <div className="h-full flex flex-col">
             {/* Sticky Header Section */}
-            <div className="sticky top-0 z-10 bg-inherit border-b border-gray-200 dark:border-gray-700">
+            <div className="sticky top-0 z-10 bg-inherit">
               <div className="p-1 space-y-1">
                 <HeaderSection
                   isDarkMode={isDarkMode}

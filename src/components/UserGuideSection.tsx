@@ -27,7 +27,7 @@ const UserGuideSection: React.FC = () => {
 - Download and install the Chrome extension
 - Enable Developer Mode in Chrome Extensions  
 - Load the extension and open Chrome DevTools
-- Navigate to the "HAR Extractor" tab
+- Navigate to the "Conga Debugger" tab
 
 ## HAR File Analysis
 - Import HAR files for network traffic analysis
@@ -62,7 +62,7 @@ const UserGuideSection: React.FC = () => {
 ## Quick Start Guide
 1. Install the extension in Chrome
 2. Open Developer Tools (F12)
-3. Find the "HAR Extractor" tab
+3. Find the "Conga Debugger" tab
 4. Start monitoring network traffic
 5. Use filters to find specific requests
 6. Export or analyze the data

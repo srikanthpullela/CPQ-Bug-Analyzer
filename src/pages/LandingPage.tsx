@@ -15,7 +15,6 @@ import {
   Search, 
   Zap,
   ArrowRight,
-  Bug,
   Network,
   Settings,
   FileX2,
@@ -91,17 +90,11 @@ const LandingPage: React.FC = () => {
       <StickyHeader />
       
       {/* Hero Section */}
-      <header className="relative overflow-hidden bg-gradient-to-r from-blue-600 via-purple-600 to-indigo-700 transition-all duration-500 w-full max-w-full">
-        <div className="absolute inset-0 bg-black/20"></div>
+      <header className="relative overflow-hidden transition-all duration-500 w-full max-w-full" style={{background: '#1a1145'}}>
         <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 transition-all duration-500 py-24">
           <div className="text-center">
-            <div className="flex justify-center items-center mb-6">
-              <div className="p-4 bg-white/10 rounded-full backdrop-blur-sm transition-all duration-500">
-                <Bug className="text-white transition-all duration-500 w-12 h-12" />
-              </div>
-            </div>
             <h1 className="font-bold text-white mb-6 transition-all duration-500 text-4xl md:text-6xl">
-              <span className="text-red-400">Conga</span> Bug Analyzer
+              <span style={{color: '#7c6cf0'}}>Conga</span> Debugger
             </h1>
             <p className="text-blue-100 mb-8 max-w-3xl mx-auto transition-all duration-500 text-xl md:text-2xl">
               Comprehensive debugging and analysis toolkit for Conga CPQ
@@ -208,7 +201,7 @@ const LandingPage: React.FC = () => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="text-center mb-16">
             <h2 className="text-3xl md:text-4xl font-bold text-gray-900 mb-4">
-              Why Choose Conga Bug Analyzer?
+              Why Choose Conga Debugger?
             </h2>
             <p className="text-xl text-gray-600">
               Built specifically for Conga CPQ/Platform debugging and analysis
@@ -306,7 +299,8 @@ const LandingPage: React.FC = () => {
 
           <Link
             to="/har"
-            className="inline-flex items-center px-8 py-4 bg-gradient-to-r from-blue-600 to-purple-600 text-white font-semibold rounded-lg hover:from-blue-700 hover:to-purple-700 transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-1"
+            className="inline-flex items-center px-8 py-4 text-white font-semibold rounded-lg transition-all duration-200 shadow-lg hover:shadow-xl transform hover:-translate-y-1"
+            style={{background: '#7c6cf0'}}
           >
             <Monitor className="w-5 h-5 mr-2" />
             Launch HAR Extractor
@@ -321,8 +315,11 @@ const LandingPage: React.FC = () => {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
             <div className="col-span-1 md:col-span-2">
               <div className="flex items-center mb-4">
-                <Bug className="w-8 h-8 text-blue-400 mr-3" />
-                <h3 className="text-xl font-bold"><span className="text-red-400">Conga</span> Bug Analyzer</h3>
+                <svg width="32" height="32" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+                  <rect width="128" height="128" fill="#1a1145" />
+                  <text x="64" y="96" textAnchor="middle" fontSize="100" fontWeight="bold" fill="#7c6cf0" fontFamily="Arial, Helvetica, sans-serif">C</text>
+                </svg>
+                <h3 className="text-xl font-bold ml-3"><span style={{color: '#7c6cf0'}}>Conga</span> Debugger</h3>
               </div>
               <p className="text-gray-400 mb-4">
                 Comprehensive debugging and analysis toolkit for Conga
@@ -409,7 +406,7 @@ const LandingPage: React.FC = () => {
 
           <div className="border-t border-gray-800 mt-8 pt-8 text-center text-gray-400">
             <p>
-              &copy; 2025 <span className="text-red-400">Conga</span> Bug Analyzer. Built for debugging excellence.
+              &copy; 2025 <span style={{color: '#7c6cf0'}}>Conga</span> Debugger. Built for debugging excellence.
             </p>
           </div>
         </div>

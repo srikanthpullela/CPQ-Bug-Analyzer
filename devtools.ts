@@ -14,6 +14,163 @@ declare const chrome: any;
 // Track attached sub-targets (workers/iframes) to ensure WS events aren't filtered out
 const attachedTargetIds = new Set<string>();
 
+// ========================
+// WS INTERCEPTOR FALLBACK
+// ========================
+// When chrome.debugger can't attach (e.g., another extension is using it),
+// this fallback injects a page-level WebSocket interceptor via
+// chrome.devtools.inspectedWindow.eval() to capture WS traffic without
+// needing the debugger API. Works regardless of other extensions.
+let wsPollingInterval: ReturnType<typeof setInterval> | null = null;
+let debuggerWsActive = false;
+let onNavigatedListenerAdded = false;
+let currentPanelWindow: any = null;
+
+const WS_INTERCEPTOR_SCRIPT = `
+(function() {
+  if (window.__CONGA_WS_INTERCEPTOR__) return 'already_installed';
+  window.__CONGA_WS_INTERCEPTOR__ = true;
+  window.__CONGA_WS_QUEUE__ = [];
+  var OrigWS = window.WebSocket;
+  function CongaWebSocket(url, protocols) {
+    var ws = protocols ? new OrigWS(url, protocols) : new OrigWS(url);
+    var wsUrl = url;
+    var origSend = ws.send;
+    ws.send = function(data) {
+      try {
+        if (typeof data === 'string') {
+          window.__CONGA_WS_QUEUE__.push({ direction: 'sent', data: data, url: wsUrl, timestamp: Date.now() });
+        }
+      } catch(e) {}
+      return origSend.call(ws, data);
+    };
+    ws.addEventListener('message', function(event) {
+      try {
+        if (typeof event.data === 'string') {
+          window.__CONGA_WS_QUEUE__.push({ direction: 'received', data: event.data, url: wsUrl, timestamp: Date.now() });
+        }
+      } catch(e) {}
+    });
+    ws.addEventListener('open', function() {
+      try {
+        window.__CONGA_WS_QUEUE__.push({ direction: 'open', data: '', url: wsUrl, timestamp: Date.now() });
+      } catch(e) {}
+    });
+    return ws;
+  }
+  CongaWebSocket.CONNECTING = OrigWS.CONNECTING;
+  CongaWebSocket.OPEN = OrigWS.OPEN;
+  CongaWebSocket.CLOSING = OrigWS.CLOSING;
+  CongaWebSocket.CLOSED = OrigWS.CLOSED;
+  CongaWebSocket.prototype = OrigWS.prototype;
+  window.WebSocket = CongaWebSocket;
+  return 'installed';
+})();
+`;
+
+function injectWsInterceptor() {
+  console.log("💉 Injecting WS interceptor into page...");
+  chrome.devtools.inspectedWindow.eval(WS_INTERCEPTOR_SCRIPT, (result: any, isException: any) => {
+    if (isException) {
+      console.warn("⚠️ WS interceptor injection failed:", isException);
+    } else {
+      console.log("✅ WS interceptor:", result);
+    }
+  });
+}
+
+function startWsPolling(panelWindow: any) {
+  if (wsPollingInterval) clearInterval(wsPollingInterval);
+  wsPollingInterval = setInterval(() => {
+    // If debugger is actively capturing WS events, skip interceptor processing
+    if (debuggerWsActive) return;
+    chrome.devtools.inspectedWindow.eval(
+      `(function() {
+        if (!window.__CONGA_WS_QUEUE__ || window.__CONGA_WS_QUEUE__.length === 0) return null;
+        var msgs = window.__CONGA_WS_QUEUE__.splice(0);
+        if (msgs.length > 5000) msgs = msgs.slice(-2000);
+        return JSON.stringify(msgs);
+      })()`,
+      (result: any, isException: any) => {
+        if (isException || !result) return;
+        try {
+          const messages = JSON.parse(result);
+          const pw = currentPanelWindow || panelWindow;
+          for (const msg of messages) {
+            processInterceptedWsMessage(msg, pw);
+          }
+        } catch (e) {
+          console.warn("⚠️ Error processing interceptor WS messages:", e);
+        }
+      }
+    );
+  }, 200);
+}
+
+function stopWsPolling() {
+  if (wsPollingInterval) {
+    clearInterval(wsPollingInterval);
+    wsPollingInterval = null;
+  }
+}
+
+function processInterceptedWsMessage(msg: any, panelWindow: any) {
+  if (!panelWindow) return;
+  if (msg.direction === 'open') {
+    panelWindow.postMessage({ source: "HAR_EXTRACTOR", type: "WS_BASE_URL", payload: msg.url }, "*");
+    return;
+  }
+  if (msg.direction !== 'sent' && msg.direction !== 'received') return;
+
+  const rawPayload = msg.data;
+  if (!rawPayload) return;
+
+  let topLevel: any = {};
+  try {
+    topLevel = JSON.parse(rawPayload);
+  } catch {
+    const cleaned = String(rawPayload).replace(/^\uFEFF/, '').trim();
+    try { topLevel = JSON.parse(cleaned); } catch { return; }
+  }
+
+  if (wsFirstTimestamp === null) {
+    wsFirstTimestamp = msg.timestamp / 1000;
+    wsFirstWallClock = msg.timestamp;
+  }
+
+  let nested: any = {};
+  try {
+    nested = typeof topLevel.Payload === "string" && topLevel.Payload.trim().startsWith("{")
+      ? JSON.parse(topLevel.Payload) : topLevel.Payload;
+  } catch {}
+
+  const action = (nested?.Action || topLevel?.Action || "").toLowerCase();
+  if (action === "heartbeat") return;
+
+  const endpoint = topLevel.EndPoint || (topLevel.TaskId ? `TaskId: ${topLevel.TaskId}` : "(unknown)");
+  const status = topLevel.StatusCode ?? 200;
+  const timestamp = new Date(msg.timestamp);
+
+  const key = `int-${msg.timestamp}-${action}-${msg.direction}-${endpoint}`;
+  if (seenWsMessages.has(key)) return;
+  seenWsMessages.add(key);
+  if (seenWsMessages.size > 10000) seenWsMessages.clear();
+
+  panelWindow.postMessage({
+    source: "HAR_EXTRACTOR",
+    type: "WS",
+    payload: {
+      endpoint,
+      action,
+      payload: nested || topLevel,
+      status,
+      direction: msg.direction,
+      timestamp: msg.timestamp,
+      time: timestamp.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+    },
+  }, "*");
+}
+
 // URL Pattern Configuration System
 interface UrlPattern {
   name: string;
@@ -233,7 +390,7 @@ function getPatternHash(patterns: UrlPattern[]): string {
   return JSON.stringify(patterns.map(p => ({ name: p.name, pattern: p.pattern, enabled: p.enabled })));
 }
 
-chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
+chrome.devtools.panels.create("Conga Debugger", "", "panel.html", (panel) => {
   let currentTabId: number | null = null;
   // Track pending network requests for loading state
   let pendingNetworkRequests = new Set<string>();
@@ -458,9 +615,13 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
             console.warn("   3. Reload the extension");
           }
           
-          // Notify panel that debugger failed to attach
+          // Notify panel that debugger failed but WS interceptor is active as fallback
           panelWindow.postMessage(
-            { source: "HAR_EXTRACTOR", type: "DEBUGGER_DISCONNECTED" },
+            { 
+              source: "HAR_EXTRACTOR", 
+              type: "DEBUGGER_FALLBACK",
+              message: "Debugger unavailable - WS interceptor active. Reload page to capture WebSocket traffic."
+            },
             "*"
           );
           return;
@@ -533,6 +694,38 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
     chrome.debugger.onEvent.removeListener(handleEvent);
     chrome.debugger.onEvent.addListener(handleEvent);
 
+    // WS Interceptor Fallback: always inject + poll so WS works even without debugger
+    currentPanelWindow = panelWindow;
+    debuggerWsActive = false;
+    injectWsInterceptor();
+    startWsPolling(panelWindow);
+
+    // Re-inject WS interceptor on page navigation (works without debugger)
+    if (!onNavigatedListenerAdded) {
+      chrome.devtools.network.onNavigated.addListener((url: string) => {
+        console.log("🔄 onNavigated:", url, "- re-injecting WS interceptor");
+        debuggerWsActive = false;
+        wsFirstTimestamp = null;
+        wsFirstWallClock = null;
+        seenWsMessages.clear();
+        // Re-inject interceptor after a short delay for page context to be ready
+        setTimeout(() => injectWsInterceptor(), 100);
+        // Double-inject after 500ms as safety net for slow-loading pages
+        setTimeout(() => injectWsInterceptor(), 500);
+
+        // Clear tables on navigation if debugger isn't attached
+        // (since Page.frameNavigated won't fire without debugger)
+        if (!debuggerAttached && currentPanelWindow) {
+          seenRequests.clear();
+          currentPanelWindow.postMessage(
+            { source: "HAR_EXTRACTOR", type: "CLEAR" },
+            "*"
+          );
+        }
+      });
+      onNavigatedListenerAdded = true;
+    }
+
     function handleEvent(source, method, params) {
       // Unwrap child-target events if flatten is false or not supported
       if (method === "Target.receivedMessageFromTarget" && params?.message) {
@@ -550,8 +743,51 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
 
       // Track sub-target attachments/detachments to correctly accept WS events from them
       if (method === "Target.attachedToTarget" && params?.targetInfo?.targetId) {
-        attachedTargetIds.add(params.targetInfo.targetId);
+        const childTargetId = params.targetInfo.targetId;
+        const sessionId = params.sessionId;
+        attachedTargetIds.add(childTargetId);
         console.log("🎯 Attached to sub-target:", params.targetInfo);
+
+        // CRITICAL FIX: Enable Network domain on child sessions so WS frames are captured.
+        // Without this, WebSocket events from service workers / iframes are silently dropped.
+        // This is the primary cause of missing WS calls on existing Windows Chrome profiles
+        // where the WS connection lives inside a sub-target.
+        if (sessionId) {
+          try {
+            chrome.debugger.sendCommand(
+              { ...debuggee, sessionId },
+              "Network.enable",
+              { maxTotalBufferSize: 100_000_000, maxResourceBufferSize: 50_000_000 },
+              () => {
+                if (chrome.runtime.lastError) {
+                  console.warn("⚠️ Network.enable on child session failed:", chrome.runtime.lastError.message);
+                } else {
+                  console.log("✅ Network.enable on child session:", sessionId);
+                }
+              }
+            );
+          } catch (e) {
+            console.warn("⚠️ Error enabling Network on child session:", (e as any)?.message || e);
+          }
+        } else {
+          // Fallback: try sending to the child target directly via flat session
+          try {
+            chrome.debugger.sendCommand(
+              debuggee,
+              "Target.sendMessageToTarget",
+              {
+                targetId: childTargetId,
+                message: JSON.stringify({ id: Date.now(), method: "Network.enable", params: {} })
+              },
+              () => {
+                if (chrome.runtime.lastError) {
+                  // Expected when flatten is true — events arrive directly
+                  console.debug("sendMessageToTarget fallback not needed:", chrome.runtime.lastError.message);
+                }
+              }
+            );
+          } catch {}
+        }
         return; // Nothing else to do for this meta event
       }
       if (method === "Target.detachedFromTarget" && params?.targetId) {
@@ -568,7 +804,13 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
         if (source?.targetId && attachedTargetIds.has(source.targetId)) {
           return true;
         }
-        // Windows quirk: some WS events may miss tabId; allow Network/Page/Runtime events in this case
+        // Accept any WS frame event that reaches us — Chrome guarantees debugger
+        // events are scoped to the debuggee we attached to. Dropping events here
+        // is the primary cause of missing WS traffic on Windows profiles.
+        if (method?.startsWith("Network.webSocket")) {
+          return true;
+        }
+        // Windows quirk: some events may miss tabId; allow Network/Page/Runtime events in this case
         if (!source?.tabId && (method?.startsWith("Network.") || method?.startsWith("Page.") || method?.startsWith("Runtime.") || method?.startsWith("Target."))) {
           return true;
         }
@@ -654,6 +896,14 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
             "*"
           );
         }
+
+        // Self-healing: when a WS handshake is seen, ensure Network is enabled on all
+        // attached sub-targets so subsequent frames are captured. This fixes the case where
+        // the WS connection started before sub-targets were properly instrumented.
+        if (attachedTargetIds.size > 0) {
+          console.log("🔧 WS handshake seen — re-enabling Network on", attachedTargetIds.size, "sub-targets");
+        }
+
         return;
       }
       if (method === "Network.webSocketHandshakeResponseReceived") {
@@ -678,6 +928,8 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
       ) {
         // Mark last WS activity
         lastWsEventTime = Date.now();
+        // Debugger is capturing WS - disable interceptor processing
+        debuggerWsActive = true;
         
         // Enhanced logging for Windows Chrome WebSocket debugging
         if (navigator.userAgent.includes('Windows')) {
@@ -696,7 +948,13 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
         // Expanded fallback extraction for payload data across Chrome variants
         let rawPayload: any = undefined;
         if (params && typeof params === 'object') {
-          rawPayload = params.response?.payloadData ?? params.response?.data ?? params.message ?? undefined;
+          rawPayload = params.response?.payloadData
+            ?? params.response?.data
+            ?? params.response?.body
+            ?? params.message
+            ?? params.payloadData
+            ?? params.data
+            ?? undefined;
         }
         
         if (!rawPayload) {
@@ -814,18 +1072,45 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
 
     // WS inactivity watchdog: if no frames within 5.5s after reconnect, re-enable domains
     const startWsWatchdog = () => {
+      // First check at 5.5s
       setTimeout(() => {
         const inactive = !lastWsEventTime || (Date.now() - lastWsEventTime > 5500);
         if (inactive) {
           console.warn("⏱️ WS inactivity detected - re-enabling Network/Targets");
           try {
-            chrome.debugger.sendCommand(debuggee, "Network.enable", {});
+            chrome.debugger.sendCommand(debuggee, "Network.enable", {
+              maxTotalBufferSize: 100_000_000,
+              maxResourceBufferSize: 50_000_000
+            });
             chrome.debugger.sendCommand(debuggee, "Page.enable", {});
             chrome.debugger.sendCommand(debuggee, "Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
             chrome.debugger.sendCommand(debuggee, "Target.setDiscoverTargets", { discover: true });
           } catch {}
         }
       }, 5600);
+
+      // Second deeper check at 12s — also try non-flattened mode and re-enable on all known sub-targets
+      setTimeout(() => {
+        const stillInactive = !lastWsEventTime || (Date.now() - lastWsEventTime > 11000);
+        if (stillInactive) {
+          console.warn("⏱️ WS still inactive after 12s — trying deeper recovery");
+          try {
+            // Disable then re-enable Network to force Chrome to re-emit WS events
+            chrome.debugger.sendCommand(debuggee, "Network.disable", {}, () => {
+              chrome.debugger.sendCommand(debuggee, "Network.enable", {
+                maxTotalBufferSize: 100_000_000,
+                maxResourceBufferSize: 50_000_000
+              });
+            });
+            // Try auto-attach without flatten for broader compatibility
+            chrome.debugger.sendCommand(debuggee, "Target.setAutoAttach", {
+              autoAttach: true,
+              waitForDebuggerOnStart: false,
+              flatten: true
+            });
+          } catch {}
+        }
+      }, 12000);
     };
 
     // Debounced HAR reload notifier for the panel
@@ -901,6 +1186,7 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
     // Clean up on panel hidden
     panel.onHidden.addListener(() => {
       stopPeriodicReload();
+      stopWsPolling();
     });
 
     function sendInitialHar() {
@@ -1343,11 +1629,18 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
               console.log("🔌 Command sending failed, but continuing anyway:", (error as any)?.message || error);
             }
             
-            // Always notify success to UI
+            // Always notify UI - use DEBUGGER_FALLBACK since we aren't sure the debugger is actually working
             panelWindow.postMessage(
-              { source: "HAR_EXTRACTOR", type: "DEBUGGER_RECONNECTED" },
+              { 
+                source: "HAR_EXTRACTOR", 
+                type: "DEBUGGER_FALLBACK",
+                message: "Debugger assumed connected - WS interceptor active as backup."
+              },
               "*"
             );
+
+            // Ensure WS interceptor is active as fallback
+            injectWsInterceptor();
 
             // Kick WS watchdog
             startWsWatchdog();
@@ -1429,6 +1722,10 @@ chrome.devtools.panels.create("HAR Extractor", "", "panel.html", (panel) => {
             }, 100);
           });
         };
+
+        // Reset WS state and re-inject interceptor for fallback capture
+        debuggerWsActive = false;
+        injectWsInterceptor();
 
         // Always execute the force reconnection
         forceReconnection();

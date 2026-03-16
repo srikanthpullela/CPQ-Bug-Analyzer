@@ -1,7 +1,6 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
 import { 
-  Bug, 
   Monitor, 
   GitCompare, 
   ArrowRight, 
@@ -40,7 +39,7 @@ const StickyHeader: React.FC = () => {
 
   // Define feature icons for each row
   const firstRowFeatures = [
-    { icon: Monitor, title: 'HAR Extractor', link: '/har' },
+    { icon: Monitor, title: 'Conga Debugger', link: '/har' },
     { icon: GitCompare, title: 'Request/Response Compare', link: '/compare-tool' },
     { icon: Code, title: 'JSON Prettifier', link: '/formatter' }
   ];
@@ -79,12 +78,13 @@ const StickyHeader: React.FC = () => {
             <div className="flex items-center justify-between h-16">
               {/* Logo */}
               <Link to="/" className="flex items-center space-x-3">
-                <div className="p-2 bg-gradient-to-r from-blue-600 to-purple-600 rounded-lg">
-                  <Bug className="w-6 h-6 text-white" />
-                </div>
+                <svg width="32" height="32" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+                  <rect width="128" height="128" fill="#1a1145" />
+                  <text x="64" y="96" textAnchor="middle" fontSize="100" fontWeight="bold" fill="#7c6cf0" fontFamily="Arial, Helvetica, sans-serif">C</text>
+                </svg>
                 <div>
                   <h1 className="text-lg font-bold text-gray-900">
-                    <span className="text-red-500">Conga</span> Bug Analyzer
+                    <span className="text-purple-600">Conga</span> Debugger
                   </h1>
                 </div>
               </Link>
@@ -184,7 +184,7 @@ const StickyHeader: React.FC = () => {
                     className="hidden lg:inline-flex items-center px-3 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 transition-colors"
                   >
                     <Monitor className="w-4 h-4 mr-2" />
-                    HAR Extractor
+                    Conga Debugger
                   </Link>
                   <Link
                     to="/compare-tool"

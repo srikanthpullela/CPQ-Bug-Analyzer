@@ -368,12 +368,12 @@ export const HttpTableTab: React.FC<Props> = ({
           isDarkMode ? "bg-gray-700" : "bg-gray-50"
         }`}>
           <tr>
-            <th className={`px-2 py-0.5 text-left text-xs font-medium transition-colors duration-200 ${
+            <th className={`px-1 py-0.5 text-left text-xs font-medium w-0 whitespace-nowrap transition-colors duration-200 ${
               isDarkMode 
                 ? "text-gray-200" 
                 : "text-gray-700"
             }`}>#</th>
-            <th className={`px-2 py-0.5 text-left text-xs font-medium transition-colors duration-200 ${
+            <th className={`px-1 py-0.5 text-left text-xs font-medium w-0 whitespace-nowrap transition-colors duration-200 ${
               isDarkMode 
                 ? "text-gray-200" 
                 : "text-gray-700"
@@ -444,12 +444,12 @@ export const HttpTableTab: React.FC<Props> = ({
                 );
               }}
             >
-              <td className={`px-2 py-0.5 text-xs transition-colors duration-200 ${
+              <td className={`px-1 py-0.5 text-xs w-0 whitespace-nowrap transition-colors duration-200 ${
                 isDarkMode 
                   ? "text-gray-200" 
                   : "text-gray-700"
               }`}>{i + 1}</td>
-              <td className={`px-2 py-0.5 text-xs transition-colors duration-200 ${
+              <td className={`px-1 py-0.5 text-xs w-0 whitespace-nowrap transition-colors duration-200 ${
                 isDarkMode 
                   ? "text-gray-200" 
                   : "text-gray-700"
