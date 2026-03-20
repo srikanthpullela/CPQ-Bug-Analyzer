@@ -795,27 +795,32 @@ chrome.devtools.panels.create("Conga Debugger", "", "panel.html", (panel: any) =
     // Re-inject WS interceptor on page navigation (works without debugger)
     if (!onNavigatedListenerAdded) {
       chrome.devtools.network.onNavigated.addListener((url: string) => {
-        console.log("🔄 onNavigated:", url, "- re-injecting WS interceptor");
+        console.log("🔄 onNavigated:", url, "- clearing tables and re-injecting WS interceptor");
         debuggerWsActive = false;
         wsFirstTimestamp = null;
         wsFirstWallClock = null;
         seenWsMessages.clear();
+        seenRequests.clear();
+        // Clear TaskId duration tracking from previous page
+        for (const key in wsSentTimestamps) {
+          delete wsSentTimestamps[key];
+        }
+
+        // Always clear tables on navigation — this fires for both
+        // debugger-attached and non-attached scenarios
+        if (currentPanelWindow) {
+          currentPanelWindow.postMessage(
+            { source: "HAR_EXTRACTOR", type: "CLEAR" },
+            "*"
+          );
+        }
+
         // Re-inject interceptor after a short delay for page context to be ready
         setTimeout(() => injectWsInterceptor(), 100);
         // Double-inject after 500ms as safety net for slow-loading pages
         setTimeout(() => injectWsInterceptor(), 500);
         // Third inject at 1.5s for very slow pages
         setTimeout(() => injectWsInterceptor(), 1500);
-
-        // Clear tables on navigation if debugger isn't attached
-        // (since Page.frameNavigated won't fire without debugger)
-        if (!debuggerAttached && currentPanelWindow) {
-          seenRequests.clear();
-          currentPanelWindow.postMessage(
-            { source: "HAR_EXTRACTOR", type: "CLEAR" },
-            "*"
-          );
-        }
 
         // On navigation, the debugger detaches. Try to re-attach since the
         // conflicting extension may not re-attach immediately after navigation.

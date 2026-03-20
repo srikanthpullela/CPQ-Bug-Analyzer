@@ -214,15 +214,6 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
               </button>
             </div>
           )}
-          {interceptorMode && (
-            <div className={`px-2 py-0.5 rounded-md text-xs font-medium ${
-              isDarkMode 
-                ? "bg-amber-900 text-amber-200" 
-                : "bg-amber-100 text-amber-800"
-            }`} title="Debugger unavailable (extension conflict). WS interceptor is capturing WebSocket traffic. Reload the page to start capturing.">
-              ⚡ WS Interceptor
-            </div>
-          )}
           
           <button
             onClick={openUrlPatternSettings}
