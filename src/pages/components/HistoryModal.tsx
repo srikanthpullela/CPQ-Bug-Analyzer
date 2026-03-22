@@ -29,7 +29,7 @@ interface Props {
   onSearch: () => void;
   onClose: () => void;
   onChangeField: (v: string) => void;
-  allFields: string[];
+  allFields: [string, number][];
 }
 
 export const HistoryModal: React.FC<Props> = ({
@@ -47,6 +47,15 @@ export const HistoryModal: React.FC<Props> = ({
   const [diffTitle, setDiffTitle] = useState<string>("");
   const [filterText, setFilterText] = useState("");
   const [isSearching, setIsSearching] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  const filteredSuggestions = fieldName
+    ? allFields.filter(
+        ([k]) =>
+          k.toLowerCase().includes(fieldName.toLowerCase()) &&
+          k.toLowerCase() !== fieldName.toLowerCase()
+      )
+    : allFields;
 
   if (!open) return null;
 
@@ -99,16 +108,45 @@ export const HistoryModal: React.FC<Props> = ({
                   type="text"
                   value={fieldName}
                   placeholder="Search with any API key..."
-                  onChange={(e) => onChangeField(e.target.value)}
+                  onChange={(e) => {
+                    onChangeField(e.target.value);
+                    setShowSuggestions(true);
+                  }}
+                  onFocus={() => setShowSuggestions(true)}
+                  onBlur={() => setTimeout(() => setShowSuggestions(false), 200)}
                   className="w-full pl-8 pr-3 py-1.5 rounded-md text-xs bg-gray-900 border border-gray-600 text-gray-200 placeholder-gray-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500/30"
                   onKeyDown={(e) => {
                     if (e.key === "Enter") {
                       e.preventDefault();
+                      setShowSuggestions(false);
                       handleSearch();
                     }
                   }}
                   disabled={isSearching}
                 />
+                {showSuggestions && filteredSuggestions.length > 0 && (
+                  <ul className="absolute z-50 left-0 right-0 top-full mt-1 max-h-48 overflow-y-auto rounded-md border shadow-lg bg-gray-800 border-gray-600">
+                    {filteredSuggestions.slice(0, 50).map(([key, count]) => (
+                      <li
+                        key={key}
+                        className="px-3 py-1.5 cursor-pointer text-xs font-mono text-gray-200 hover:bg-gray-700 flex justify-between transition-colors"
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          onChangeField(key);
+                          setShowSuggestions(false);
+                        }}
+                      >
+                        <span className="truncate">{key}</span>
+                        <span className="text-[11px] text-gray-400 ml-2 flex-shrink-0">({count})</span>
+                      </li>
+                    ))}
+                    {filteredSuggestions.length > 50 && (
+                      <li className="px-3 py-1 text-[11px] italic text-gray-500">
+                        \u2026and {filteredSuggestions.length - 50} more
+                      </li>
+                    )}
+                  </ul>
+                )}
               </div>
               <button
                 onClick={handleSearch}

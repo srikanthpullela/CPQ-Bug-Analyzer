@@ -14,6 +14,7 @@ interface FrameMatch {
   objName?: string;
   objData?: any;
   prevObjData?: any;
+  productName?: string;
 }
 
 interface HistoryEvent {
@@ -29,7 +30,7 @@ interface Props {
   onSearch: () => void;
   onClose: () => void;
   onChangeField: (v: string) => void;
-  allFields: string[];
+  allFields: [string, number][];
   origin?: string;
   isDarkMode?: boolean;
 }
@@ -51,6 +52,35 @@ export const HistoryModalTab: React.FC<Props> = ({
   const [diffTitle, setDiffTitle] = useState<string>("");
   const [filterText, setFilterText] = useState("");
   const [isSearching, setIsSearching] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+
+  const filteredSuggestions = fieldName
+    ? allFields.filter(
+        ([k]) =>
+          k.toLowerCase().includes(fieldName.toLowerCase()) &&
+          k.toLowerCase() !== fieldName.toLowerCase()
+      )
+    : allFields;
+
+  /** Wraps matching substrings in <mark> tags */
+  const highlightText = (text: string, query: string) => {
+    if (!query) return <>{text}</>;
+    const escaped = query.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const parts = text.split(new RegExp(`(${escaped})`, "gi"));
+    return (
+      <>
+        {parts.map((part, i) =>
+          part.toLowerCase() === query.toLowerCase() ? (
+            <mark key={i} className="bg-yellow-300 text-black rounded px-0.5">
+              {part}
+            </mark>
+          ) : (
+            <span key={i}>{part}</span>
+          )
+        )}
+      </>
+    );
+  };
 
   if (!open) return null;
 
@@ -125,24 +155,80 @@ export const HistoryModalTab: React.FC<Props> = ({
             }`}
           >
             <div className="flex space-x-2">
-              <input
-                type="text"
-                value={fieldName}
-                placeholder="search with any API key..."
-                onChange={(e) => onChangeField(e.target.value)}
-                className={`flex-1 border px-3 py-2 rounded focus:ring transition-colors ${
-                  isDarkMode
-                    ? "border-gray-600 bg-gray-700 text-white placeholder-gray-400 focus:ring-blue-500"
-                    : "border-gray-300 bg-white text-gray-900 placeholder-gray-500 focus:ring-blue-500"
-                }`}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    handleSearch();
-                  }
-                }}
-                disabled={isSearching}
-              />
+              <div className="relative flex-1">
+                <input
+                  type="text"
+                  value={fieldName}
+                  placeholder="search with any API key..."
+                  onChange={(e) => {
+                    onChangeField(e.target.value);
+                    setShowSuggestions(true);
+                  }}
+                  onFocus={() => setShowSuggestions(true)}
+                  onBlur={() => {
+                    // Delay to allow click on suggestion
+                    setTimeout(() => setShowSuggestions(false), 200);
+                  }}
+                  className={`w-full border px-3 py-2 rounded focus:ring transition-colors ${
+                    isDarkMode
+                      ? "border-gray-600 bg-gray-700 text-white placeholder-gray-400 focus:ring-blue-500"
+                      : "border-gray-300 bg-white text-gray-900 placeholder-gray-500 focus:ring-blue-500"
+                  }`}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      setShowSuggestions(false);
+                      handleSearch();
+                    }
+                  }}
+                  disabled={isSearching}
+                />
+                {showSuggestions && filteredSuggestions.length > 0 && (
+                  <ul
+                    className={`absolute z-50 left-0 right-0 top-full mt-1 max-h-48 overflow-y-auto rounded border shadow-lg ${
+                      isDarkMode
+                        ? "bg-gray-700 border-gray-600"
+                        : "bg-white border-gray-300"
+                    }`}
+                  >
+                    {filteredSuggestions.slice(0, 50).map(([key, count]) => (
+                      <li
+                        key={key}
+                        className={`px-3 py-1.5 cursor-pointer text-sm flex justify-between transition-colors ${
+                          isDarkMode
+                            ? "text-gray-200 hover:bg-gray-600"
+                            : "text-gray-800 hover:bg-blue-50"
+                        }`}
+                        onMouseDown={(e) => {
+                          e.preventDefault();
+                          onChangeField(key);
+                          setShowSuggestions(false);
+                        }}
+                      >
+                        <span className="font-mono truncate">
+                          {highlightText(key, fieldName)}
+                        </span>
+                        <span
+                          className={`text-xs ml-2 flex-shrink-0 ${
+                            isDarkMode ? "text-gray-400" : "text-gray-400"
+                          }`}
+                        >
+                          ({count})
+                        </span>
+                      </li>
+                    ))}
+                    {filteredSuggestions.length > 50 && (
+                      <li
+                        className={`px-3 py-1 text-xs italic ${
+                          isDarkMode ? "text-gray-400" : "text-gray-500"
+                        }`}
+                      >
+                        …and {filteredSuggestions.length - 50} more
+                      </li>
+                    )}
+                  </ul>
+                )}
+              </div>
               <button
                 onClick={handleSearch}
                 disabled={isSearching}
@@ -166,24 +252,37 @@ export const HistoryModalTab: React.FC<Props> = ({
               </button>
             </div>
 
-            <input
-              type="text"
-              placeholder="Filter within results..."
-              value={filterText}
-              onChange={(e) => setFilterText(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  // Filter is reactive, no additional action needed
-                }
-              }}
-              className={`w-full border px-3 py-2 rounded focus:ring transition-colors ${
-                isDarkMode
-                  ? "border-gray-600 bg-gray-700 text-white placeholder-gray-400 focus:ring-blue-500"
-                  : "border-gray-300 bg-white text-gray-900 placeholder-gray-500 focus:ring-blue-500"
-              }`}
-              disabled={isSearching}
-            />
+            <div className="relative">
+              <input
+                type="text"
+                placeholder="Filter within results..."
+                value={filterText}
+                onChange={(e) => setFilterText(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                  }
+                }}
+                className={`w-full border px-3 py-2 rounded focus:ring transition-colors ${
+                  isDarkMode
+                    ? "border-gray-600 bg-gray-700 text-white placeholder-gray-400 focus:ring-blue-500"
+                    : "border-gray-300 bg-white text-gray-900 placeholder-gray-500 focus:ring-blue-500"
+                }`}
+                disabled={isSearching}
+              />
+              {filterText && (
+                <button
+                  onClick={() => setFilterText("")}
+                  className={`absolute right-2 top-1/2 -translate-y-1/2 text-sm ${
+                    isDarkMode
+                      ? "text-gray-400 hover:text-white"
+                      : "text-gray-400 hover:text-gray-700"
+                  }`}
+                >
+                  <X size={16} />
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Scrollable List */}
@@ -215,7 +314,7 @@ export const HistoryModalTab: React.FC<Props> = ({
             ) : history.length > 0 ? (
               history.map((evt, i) => {
                 const filteredItems = evt.items.filter((it) =>
-                  [it.id, it.objName, it.oldVal, it.newVal]
+                  [it.id, it.objName, it.oldVal, it.newVal, (it as any).productName]
                     .map((v) => String(v ?? "").toLowerCase())
                     .some((val) => val.includes(filterText.toLowerCase()))
                 );
@@ -240,7 +339,7 @@ export const HistoryModalTab: React.FC<Props> = ({
                         isDarkMode ? "text-gray-200" : "text-gray-900"
                       }`}
                     >
-                      [{evt.time}] <strong>{evt.source}</strong>
+                      [{evt.time}] <strong>{filterText ? highlightText(evt.source, filterText) : evt.source}</strong>
                     </div>
                     <ul className="space-y-1 pl-4">
                       {(filterText ? filteredItems : evt.items).map((it) => {
@@ -286,7 +385,7 @@ export const HistoryModalTab: React.FC<Props> = ({
                                 target="_blank"
                                 rel="noopener noreferrer"
                               >
-                                {it.id}
+                                {filterText ? highlightText(it.id, filterText) : it.id}
                               </a>
                             ) : (
                               <span
@@ -294,7 +393,21 @@ export const HistoryModalTab: React.FC<Props> = ({
                                   isDarkMode ? "text-gray-300" : "text-gray-700"
                                 }`}
                               >
-                                {it.id}
+                                {filterText ? highlightText(it.id, filterText) : it.id}
+                              </span>
+                            )}
+                            {(it as any).productName && (
+                              <span
+                                className={`ml-2 px-2 py-0.5 rounded text-xs font-medium ${
+                                  isDarkMode
+                                    ? "bg-indigo-900 text-indigo-200"
+                                    : "bg-indigo-100 text-indigo-700"
+                                }`}
+                                title={(it as any).productName}
+                              >
+                                {filterText
+                                  ? highlightText((it as any).productName, filterText)
+                                  : (it as any).productName}
                               </span>
                             )}
                             <span
@@ -326,7 +439,7 @@ export const HistoryModalTab: React.FC<Props> = ({
                                 )
                               }
                             >
-                              <code>{String(it.oldVal ?? "—")}</code>
+                              <code>{filterText ? highlightText(String(it.oldVal ?? "—"), filterText) : String(it.oldVal ?? "—")}</code>
                             </button>
                             <span
                               className={`transition-colors ${
@@ -345,7 +458,7 @@ export const HistoryModalTab: React.FC<Props> = ({
                                 preview(it.objData, `${it.objName} (after)`)
                               }
                             >
-                              <code>{String(it.newVal)}</code>
+                              <code>{filterText ? highlightText(String(it.newVal), filterText) : String(it.newVal)}</code>
                             </button>
                             <button
                               className={`ml-2 px-2 py-1 rounded text-sm transition-colors ${

@@ -51,31 +51,27 @@ const HarMethodsTabPage: React.FC = () => {
   const rulesHook = useRules(httpRows, wsRows);
   const editModalHook = useEditModal(origin);
 
-  function extractUniqueKeys(rows: any[]): string[] {
-    const keySet = new Set<string>();
+  function extractKeyCounts(rows: any[]): [string, number][] {
+    const counts = new Map<string, number>();
     rows.forEach((row) => {
       if (row && typeof row === "object") {
-        const traverse = (obj: any, prefix = "") => {
-          Object.entries(obj || {}).forEach(([key, value]) => {
-            const fullKey = prefix ? `${prefix}.${key}` : key;
-            keySet.add(fullKey);
-            if (
-              typeof value === "object" &&
-              value !== null &&
-              !Array.isArray(value)
-            ) {
-              traverse(value, fullKey);
+        const traverse = (obj: any) => {
+          if (typeof obj !== "object" || obj === null) return;
+          for (const [key, value] of Object.entries(obj)) {
+            if (typeof key === "string" && key.length > 1 && isNaN(Number(key))) {
+              counts.set(key, (counts.get(key) || 0) + 1);
             }
-          });
+            if (typeof value === "object") traverse(value);
+          }
         };
         traverse(row);
       }
     });
-    return Array.from(keySet).sort();
+    return Array.from(counts.entries()).sort();
   }
 
   const extractedKeys = useMemo(() => {
-    return extractUniqueKeys([...httpRows, ...wsRows]);
+    return extractKeyCounts([...httpRows, ...wsRows]);
   }, [httpRows, wsRows]);
 
   const showHistory = () => {

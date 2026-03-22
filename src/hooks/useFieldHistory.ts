@@ -7,6 +7,7 @@ export interface FieldChange {
   newVal: any;
   objData: any;
   prevObjData?: any;
+  productName?: string;
 }
 
 export interface HistoryEvent {
@@ -137,6 +138,15 @@ export function useFieldHistory(httpRows: HttpRow[], wsRows: WsRow[]) {
           const oldVal = lastValById[it.id];
           const prevObj = lastFullObjById[it.id] || idToObject[it.id];
 
+          // Extract product/record Name if available
+          const productName =
+            it.objData?.Name ??
+            it.objData?.ProductName ??
+            it.objData?.Apttus_Config2__ProductId__r?.Name ??
+            it.objData?.APTS_Product_Name__c ??
+            it.objData?.Product_Name__c ??
+            undefined;
+
           merged[key].items.push({
             id: it.id,
             objName: it.objName,
@@ -144,6 +154,7 @@ export function useFieldHistory(httpRows: HttpRow[], wsRows: WsRow[]) {
             newVal: it.newVal,
             objData: it.objData,
             prevObjData: oldVal !== undefined ? prevObj : undefined,
+            productName,
           });
 
           lastValById[it.id] = it.newVal;
