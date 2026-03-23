@@ -29,6 +29,11 @@ let onNavigatedListenerAdded = false;
 let currentPanelWindow: any = null;
 let debuggerRetryInterval: ReturnType<typeof setInterval> | null = null;
 
+// Lazy debugger attach callback — set by the panel.onShown handler.
+// The WS interceptor calls this when it first detects WebSocket traffic,
+// so the debugger (and the "debugging" bar) only appears for WS users.
+let lazyAttachDebuggerFn: (() => void) | null = null;
+
 const WS_INTERCEPTOR_SCRIPT = `
 (function() {
   if (window.__CONGA_WS_INTERCEPTOR__) return 'already_installed';
@@ -176,6 +181,9 @@ function processInterceptedWsMessage(msg: any, panelWindow: any) {
   if (!panelWindow) return;
   if (msg.direction === 'open') {
     panelWindow.postMessage({ source: "HAR_EXTRACTOR", type: "WS_BASE_URL", payload: msg.url }, "*");
+    // WS connection opened — lazily attach the debugger so Chrome's deeper
+    // Network.webSocketFrame* events are available going forward.
+    if (lazyAttachDebuggerFn) lazyAttachDebuggerFn();
     return;
   }
   if (msg.direction !== 'sent' && msg.direction !== 'received') return;
@@ -649,28 +657,31 @@ chrome.devtools.panels.create("Conga Debugger", "", "panel.html", (panel: any) =
     const currentPatterns = getUrlPatternsFromStorage();
     lastPatternHash = getPatternHash(currentPatterns);
 
-    if (!debuggerAttached) {
-      console.log("🔧 Attempting to attach debugger to tab:", currentTabId);
-      
-      // Enhanced error handling and diagnostics
+    // ── Lazy debugger attach ──────────────────────────────────────────
+    // The chrome.debugger API triggers a visible "started debugging this
+    // browser" bar.  HTTP capture works fine via onRequestFinished (no
+    // debugger needed), and WS traffic is initially captured by the
+    // injected page-level interceptor.  We only attach the debugger once
+    // real WS activity is detected so that users who only look at HTTP
+    // calls never see the bar.
+    //
+    // `attachDebuggerForWs()` can be called multiple times safely — it
+    // will attach only once.
+
+    function attachDebuggerForWs() {
+      if (debuggerAttached) return;     // already connected
+      console.log("🔧 WS activity detected — attaching debugger to tab:", currentTabId);
+
       chrome.debugger.attach(debuggee, "1.3", () => {
         if (chrome.runtime.lastError) {
           const errorMessage = chrome.runtime.lastError.message;
           console.error("❌ Failed to attach debugger:", errorMessage);
-          
-          // Provide specific troubleshooting guidance based on error type
+
           if (errorMessage.includes("different extension")) {
-            console.warn("🚨 TROUBLESHOOTING: This error suggests another Chrome extension is already using the debugger.");
-            console.warn("💡 SOLUTIONS:");
-            console.warn("   1. Close other DevTools panels/extensions that might be using the debugger");
-            console.warn("   2. Disable other debugging extensions temporarily");
-            console.warn("   3. Try opening this extension in a new tab/window");
-            console.warn("   4. Restart Chrome browser");
-            
-            // Send detailed error info to panel
+            console.warn("🚨 Another extension is using the debugger. WS interceptor remains active as fallback.");
             panelWindow.postMessage(
-              { 
-                source: "HAR_EXTRACTOR", 
+              {
+                source: "HAR_EXTRACTOR",
                 type: "DEBUGGER_ERROR",
                 error: errorMessage,
                 suggestions: [
@@ -682,36 +693,24 @@ chrome.devtools.panels.create("Conga Debugger", "", "panel.html", (panel: any) =
               },
               "*"
             );
-          } else if (errorMessage.includes("permission")) {
-            console.warn("🚨 TROUBLESHOOTING: Permission denied - check extension permissions");
-            console.warn("💡 SOLUTIONS:");
-            console.warn("   1. Reload the extension");
-            console.warn("   2. Check that 'debugger' permission is granted");
-            console.warn("   3. Try refreshing the page being debugged");
-          } else {
-            console.warn("🚨 TROUBLESHOOTING: Generic debugger attachment error");
-            console.warn("💡 SOLUTIONS:");
-            console.warn("   1. Refresh the target page");
-            console.warn("   2. Close and reopen DevTools");
-            console.warn("   3. Reload the extension");
           }
-          
-          // Notify panel that debugger failed but WS interceptor is active as fallback
+
           panelWindow.postMessage(
-            { 
-              source: "HAR_EXTRACTOR", 
+            {
+              source: "HAR_EXTRACTOR",
               type: "DEBUGGER_FALLBACK",
-              message: "Debugger unavailable - WS interceptor active. Reload page to capture WebSocket traffic."
+              message: "Debugger unavailable — WS interceptor active. Reload page to capture WebSocket traffic."
             },
             "*"
           );
 
-          // Start auto-retry: keep trying to attach in case the other extension releases the debugger
+          // Keep retrying in the background
           startDebuggerRetry(debuggee, panelWindow);
           return;
         }
+
         debuggerAttached = true;
-        stopDebuggerRetry(); // No need to retry, we're attached
+        stopDebuggerRetry();
         console.log("✅ Debugger attached successfully to tab:", currentTabId);
 
         try {
@@ -724,7 +723,7 @@ chrome.devtools.panels.create("Conga Debugger", "", "panel.html", (panel: any) =
         } catch (e) {
           console.warn("⚠️ Error enabling domains after attach:", (e as any)?.message || e);
         }
-        // Auto-attach to sub-targets (workers/iframes) so WS frames from them are captured
+
         chrome.debugger.sendCommand(
           debuggee,
           "Target.setAutoAttach",
@@ -743,20 +742,17 @@ chrome.devtools.panels.create("Conga Debugger", "", "panel.html", (panel: any) =
           { discover: true },
           () => {
             if (chrome.runtime.lastError) {
-              // This API is not supported in newer Chrome versions - safe to ignore
               console.debug("setDiscoverTargets not available:", chrome.runtime.lastError.message);
             } else {
               console.log("🔭 Target.setDiscoverTargets enabled");
             }
           }
         );
-        
-        // Notify panel that debugger is connected
+
         panelWindow.postMessage(
           { source: "HAR_EXTRACTOR", type: "DEBUGGER_RECONNECTED" },
           "*"
         );
-        // Start WS inactivity watchdog on initial attach as well
         try { startWsWatchdog(); } catch {}
       });
 
@@ -765,22 +761,19 @@ chrome.devtools.panels.create("Conga Debugger", "", "panel.html", (panel: any) =
         if (detachedDebuggee.tabId === currentTabId) {
           console.warn("🔌 Debugger detached:", reason);
           debuggerAttached = false;
-
-          // Notify panel that debugger was disconnected
           panelWindow.postMessage(
             { source: "HAR_EXTRACTOR", type: "DEBUGGER_DISCONNECTED" },
             "*"
           );
-
-          // Activate WS interceptor fallback immediately
           debuggerWsActive = false;
           injectWsInterceptor();
-
-          // Auto-retry debugger attachment every 10 seconds
           startDebuggerRetry(debuggee, panelWindow);
         }
       });
     }
+
+    // Expose the lazy attach so the WS interceptor (module-scope) can trigger it
+    lazyAttachDebuggerFn = attachDebuggerForWs;
 
     // Always rebind the listener safely
     chrome.debugger.onEvent.removeListener(handleEvent);
@@ -822,44 +815,9 @@ chrome.devtools.panels.create("Conga Debugger", "", "panel.html", (panel: any) =
         // Third inject at 1.5s for very slow pages
         setTimeout(() => injectWsInterceptor(), 1500);
 
-        // On navigation, the debugger detaches. Try to re-attach since the
-        // conflicting extension may not re-attach immediately after navigation.
-        if (!debuggerAttached) {
-          setTimeout(() => {
-            if (!debuggerAttached) {
-              console.log("🔄 Post-navigation: attempting debugger attach...");
-              try {
-                chrome.debugger.attach(debuggee, "1.3", () => {
-                  if (chrome.runtime.lastError) {
-                    console.log("🔄 Post-navigation attach failed:", chrome.runtime.lastError.message);
-                    // Keep the periodic retry going
-                    startDebuggerRetry(debuggee, panelWindow);
-                    return;
-                  }
-                  console.log("✅ Post-navigation: debugger attached!");
-                  debuggerAttached = true;
-                  stopDebuggerRetry();
-                  try {
-                    chrome.debugger.sendCommand(debuggee, "Network.enable", {
-                      maxTotalBufferSize: 100_000_000,
-                      maxResourceBufferSize: 50_000_000,
-                    });
-                    chrome.debugger.sendCommand(debuggee, "Page.enable", {});
-                    chrome.debugger.sendCommand(debuggee, "Target.setAutoAttach", {
-                      autoAttach: true,
-                      waitForDebuggerOnStart: false,
-                      flatten: true,
-                    });
-                  } catch {}
-                  panelWindow.postMessage(
-                    { source: "HAR_EXTRACTOR", type: "DEBUGGER_RECONNECTED" },
-                    "*"
-                  );
-                });
-              } catch {}
-            }
-          }, 500);
-        }
+        // After navigation the debugger detaches. We do NOT eagerly re-attach
+        // here — the WS interceptor will trigger attachDebuggerForWs() lazily
+        // if/when WebSocket traffic is detected on the new page.
       });
       onNavigatedListenerAdded = true;
     }
