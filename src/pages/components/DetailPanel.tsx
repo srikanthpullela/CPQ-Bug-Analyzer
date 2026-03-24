@@ -2,7 +2,7 @@
 
 import type React from "react";
 import { useEffect, useMemo, useState, useRef, useCallback } from "react";
-import ReactJson from "react-json-view";
+import JsonTreeView from "./JsonTreeView";
 
 interface Props {
   open: boolean;
@@ -98,59 +98,13 @@ function extractCleanPayload(data: any): any {
   return clean;
 }
 
-const reactJsonThemeDark = {
-  base00: "transparent",
-  base01: "#374151",
-  base02: "#4b5563",
-  base03: "#6b7280",
-  base04: "#9ca3af",
-  base05: "#f3f4f6",
-  base06: "#f9fafb",
-  base07: "#ffffff",
-  base08: "#f87171",
-  base09: "#fb923c",
-  base0A: "#fbbf24",
-  base0B: "#34d399",
-  base0C: "#22d3ee",
-  base0D: "#60a5fa",
-  base0E: "#a78bfa",
-  base0F: "#9ca3af",
-};
 
-const reactJsonThemeLight = {
-  base00: "transparent",
-  base01: "#f8f9fa",
-  base02: "#e9ecef",
-  base03: "#6c757d",
-  base04: "#495057",
-  base05: "#212529",
-  base06: "#212529",
-  base07: "#000000",
-  base08: "#dc3545",
-  base09: "#fd7e14",
-  base0A: "#ffc107",
-  base0B: "#28a745",
-  base0C: "#17a2b8",
-  base0D: "#007bff",
-  base0E: "#6f42c1",
-  base0F: "#6c757d",
-};
-
-const reactJsonStyle = {
-  fontSize: "11px",
-  lineHeight: "1.4",
-  fontFamily: "Menlo, Monaco, Consolas, 'SF Mono', 'Liberation Mono', monospace",
-  backgroundColor: "transparent",
-  padding: "0",
-  maxHeight: "100%",
-  overflow: "visible" as const,
-};
 
 // --- Sub-component: JSON content viewer (tree or raw with search) ---
 const JsonContentView: React.FC<{
   data: any;
   isDarkMode: boolean;
-  defaultCollapsed?: number;
+  defaultCollapsed?: number | boolean;
   emptyMessage?: string;
 }> = ({ data, isDarkMode, defaultCollapsed = 2, emptyMessage }) => {
   const [viewMode, setViewMode] = useState<"tree" | "raw">("tree");
@@ -349,16 +303,12 @@ const JsonContentView: React.FC<{
       {/* Content */}
       <div className="flex-1 overflow-auto p-1">
         {viewMode === "tree" ? (
-          <ReactJson
+          <JsonTreeView
             src={typeof parsed === "object" && Object.keys(parsed).length > 0 ? parsed : { value: parsed }}
             name={false}
             collapsed={defaultCollapsed}
-            enableClipboard={false}
-            displayDataTypes={false}
-            displayObjectSize={false}
-            indentWidth={2}
-            style={reactJsonStyle}
-            theme={isDarkMode ? reactJsonThemeDark : reactJsonThemeLight}
+            isDarkMode={isDarkMode}
+            indentWidth={14}
           />
         ) : (
           <div ref={rawJsonContainerRef} className={`font-mono text-[11px] leading-snug ${isDarkMode ? "text-gray-200" : "text-gray-800"}`}>
@@ -684,7 +634,7 @@ export const DetailPanel: React.FC<Props> = ({
           <JsonContentView
             data={responseData}
             isDarkMode={isDarkMode}
-            defaultCollapsed={2}
+            defaultCollapsed={false}
             emptyMessage="No response data"
           />
         )}

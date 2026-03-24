@@ -232,13 +232,17 @@ function processInterceptedWsMessage(msg: any, panelWindow: any) {
       const sentTs = wsSentTimestamps[taskId];
       if (sentTs) {
         const diffMs = msg.timestamp - sentTs;
-        const totalSec = Math.round(diffMs / 1000);
-        if (totalSec < 60) {
-          duration = `${totalSec}s`;
-        } else {
-          const min = Math.floor(totalSec / 60);
-          const sec = totalSec % 60;
-          duration = sec > 0 ? `${min}m ${sec}s` : `${min}m`;
+        // Sanity check: ignore negative or absurdly large durations
+        // (can happen when sent/received come from different capture paths)
+        if (diffMs >= 0 && diffMs < 3600000) {
+          const totalSec = Math.round(diffMs / 1000);
+          if (totalSec < 60) {
+            duration = `${totalSec}s`;
+          } else {
+            const min = Math.floor(totalSec / 60);
+            const sec = totalSec % 60;
+            duration = sec > 0 ? `${min}m ${sec}s` : `${min}m`;
+          }
         }
       }
     }
@@ -1235,21 +1239,27 @@ chrome.devtools.panels.create("Conga Debugger", "", "panel.html", (panel: any) =
         };
 
         // Calculate duration between sent and received using TaskId
+        // Always use wall-clock epoch ms so both debugger and interceptor paths
+        // store comparable values in wsSentTimestamps.
+        const nowMs = Date.now();
         const taskId = topLevel.TaskId;
         if (taskId) {
           if (direction === "sent") {
-            wsSentTimestamps[taskId] = timestamp.getTime();
+            wsSentTimestamps[taskId] = nowMs;
           } else {
             const sentTs = wsSentTimestamps[taskId];
             if (sentTs) {
-              const diffMs = timestamp.getTime() - sentTs;
-              const totalSec = Math.round(diffMs / 1000);
-              if (totalSec < 60) {
-                wsPayload.duration = `${totalSec}s`;
-              } else {
-                const min = Math.floor(totalSec / 60);
-                const sec = totalSec % 60;
-                wsPayload.duration = sec > 0 ? `${min}m ${sec}s` : `${min}m`;
+              const diffMs = nowMs - sentTs;
+              // Sanity check: ignore negative or absurdly large durations
+              if (diffMs >= 0 && diffMs < 3600000) {
+                const totalSec = Math.round(diffMs / 1000);
+                if (totalSec < 60) {
+                  wsPayload.duration = `${totalSec}s`;
+                } else {
+                  const min = Math.floor(totalSec / 60);
+                  const sec = totalSec % 60;
+                  wsPayload.duration = sec > 0 ? `${min}m ${sec}s` : `${min}m`;
+                }
               }
             }
           }
