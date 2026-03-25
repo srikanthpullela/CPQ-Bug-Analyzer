@@ -133,10 +133,7 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
     >
       <div className="flex items-center justify-between mb-1">
         <div className="flex items-center gap-2">
-          <svg width="16" height="16" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
-            <rect width="128" height="128" fill="#1a1145" />
-            <text x="64" y="96" textAnchor="middle" fontSize="100" fontWeight="bold" fill="#7c6cf0" fontFamily="Arial, Helvetica, sans-serif">C</text>
-          </svg>
+          <img src="icon-48.png" alt="Conga" width="16" height="16" style={{ borderRadius: 2 }} />
           <div className="flex items-center gap-1.5 text-xs">
             <span
               className={`px-1.5 py-0.5 rounded-full font-medium text-align-center transition-colors duration-75 ${

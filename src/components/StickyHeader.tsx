@@ -78,10 +78,7 @@ const StickyHeader: React.FC = () => {
             <div className="flex items-center justify-between h-16">
               {/* Logo */}
               <Link to="/" className="flex items-center space-x-3">
-                <svg width="32" height="32" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
-                  <rect width="128" height="128" fill="#1a1145" />
-                  <text x="64" y="96" textAnchor="middle" fontSize="100" fontWeight="bold" fill="#7c6cf0" fontFamily="Arial, Helvetica, sans-serif">C</text>
-                </svg>
+                <img src="/icon-128.png" alt="Conga" width="32" height="32" style={{ borderRadius: 4 }} />
                 <div>
                   <h1 className="text-lg font-bold text-gray-900">
                     <span className="text-purple-600">Conga</span> Debugger

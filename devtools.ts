@@ -483,7 +483,7 @@ function getPatternHash(patterns: UrlPattern[]): string {
   return JSON.stringify(patterns.map(p => ({ name: p.name, pattern: p.pattern, enabled: p.enabled })));
 }
 
-chrome.devtools.panels.create("Conga Debugger", "", "panel.html", (panel: any) => {
+chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (panel: any) => {
   let currentTabId: number | null = null;
   // Track pending network requests for loading state
   let pendingNetworkRequests = new Set<string>();

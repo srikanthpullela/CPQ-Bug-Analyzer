@@ -315,10 +315,7 @@ const LandingPage: React.FC = () => {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
             <div className="col-span-1 md:col-span-2">
               <div className="flex items-center mb-4">
-                <svg width="32" height="32" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
-                  <rect width="128" height="128" fill="#1a1145" />
-                  <text x="64" y="96" textAnchor="middle" fontSize="100" fontWeight="bold" fill="#7c6cf0" fontFamily="Arial, Helvetica, sans-serif">C</text>
-                </svg>
+                <img src="/icon-128.png" alt="Conga" width="32" height="32" style={{ borderRadius: 4 }} />
                 <h3 className="text-xl font-bold ml-3"><span style={{color: '#7c6cf0'}}>Conga</span> Debugger</h3>
               </div>
               <p className="text-gray-400 mb-4">
