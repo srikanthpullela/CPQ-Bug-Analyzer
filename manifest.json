@@ -2,6 +2,7 @@
   "name": "Conga Debugger",
   "version": "1.0",
   "manifest_version": 3,
+  "description": "Chrome DevTools extension for debugging and analyzing Conga CPQ network traffic, WebSocket messages, and API requests.",
   "icons": {
     "16": "icon-16.png",
     "48": "icon-48.png",
@@ -16,8 +17,10 @@
     }
   },
   "background": { "service_worker": "background.js" },
-  "permissions": ["tabs", "debugger", "storage"],
-  "host_permissions": ["<all_urls>"],
+  "permissions": ["debugger"],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self';"
+  },
   "devtools_page": "devtools.html",
   "web_accessible_resources": [
     { "resources": ["panel.html", "panel.js"], "matches": ["<all_urls>"] }

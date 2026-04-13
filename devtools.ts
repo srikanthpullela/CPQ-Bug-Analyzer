@@ -593,21 +593,26 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
         }
         
         // Build the fetch call using chrome.devtools.inspectedWindow.eval
+        const safeUrl = JSON.stringify(url);
+        const safeMethod = JSON.stringify(method);
+        const safeHeaders = JSON.stringify(headersObj);
+        const safeBody = cleanPayload ? JSON.stringify(JSON.stringify(cleanPayload)) : null;
         const evalScript = `
           (function() {
-            console.log("[HAR_RETRIGGER] Starting fetch to: ${url}");
-            console.log("[HAR_RETRIGGER] Script is executing in page context for tab: ${currentTabId}");
+            var targetUrl = ${safeUrl};
+            var targetMethod = ${safeMethod};
+            console.log("[HAR_RETRIGGER] Starting fetch to: " + targetUrl);
             
-            const fetchOptions = {
-              method: "${method}",
-              headers: ${JSON.stringify(headersObj)},
+            var fetchOptions = {
+              method: targetMethod,
+              headers: ${safeHeaders},
               credentials: "include"${cleanPayload ? `,
-              body: ${JSON.stringify(JSON.stringify(cleanPayload))}` : ''}
+              body: ${safeBody}` : ''}
             };
             
             console.log("[HAR_RETRIGGER] Fetch options:", fetchOptions);
             
-            return fetch("${url}", fetchOptions)
+            return fetch(targetUrl, fetchOptions)
               .then(response => {
                 console.log("[HAR_RETRIGGER] Response status:", response.status);
                 window.postMessage({ 

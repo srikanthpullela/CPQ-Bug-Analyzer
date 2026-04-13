@@ -6,6 +6,7 @@ import "./LogAnalyzerPage.css";
 import { LogEntry, parseLogFile } from "../utils/log-parser";
 import { Link } from "react-router-dom";
 import { ArrowLeft, Home } from "lucide-react";
+import { escapeHtml } from "../utils/sanitize";
 
 interface ExceptionEntry {
   exception: string;
@@ -331,15 +332,15 @@ export default function LogAnalyzerPage() {
                 }
 
                 const highlightedHeader = highlightRE
-                  ? ex.exception.replace(
+                  ? escapeHtml(ex.exception).replace(
                       highlightRE,
                       (m) => `<mark>${m}</mark>`
                     )
-                  : ex.exception;
+                  : escapeHtml(ex.exception);
 
                 const highlightedThread = highlightRE
-                  ? ex.thread.replace(highlightRE, (m) => `<mark>${m}</mark>`)
-                  : ex.thread;
+                  ? escapeHtml(ex.thread).replace(highlightRE, (m) => `<mark>${m}</mark>`)
+                  : escapeHtml(ex.thread);
 
                 const isOpen = expandedIndex === realIdx;
                 const windowDef = lineWindow[realIdx] || { start: 0, end: 0 };
@@ -402,11 +403,11 @@ export default function LogAnalyzerPage() {
                         <pre className="log-snippet">
                           {visibleLines.map((line, idx) => {
                             const rendered = highlightRE
-                              ? line.replace(
+                              ? escapeHtml(line).replace(
                                   highlightRE,
                                   (m) => `<mark>${m}</mark>`
                                 )
-                              : line;
+                              : escapeHtml(line);
                             return (
                               <div
                                 key={idx}

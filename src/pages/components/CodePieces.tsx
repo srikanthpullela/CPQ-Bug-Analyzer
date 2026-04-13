@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Link } from "react-router-dom";
 import { Plus, Copy, Trash2, Edit3, Save, X, Search, Code, FileText, AlertTriangle, HardDrive, Home, ArrowLeft } from "lucide-react";
+import { escapeHtml } from "../../utils/sanitize";
 
 interface CodePiece {
   id: string;
@@ -278,7 +279,7 @@ export const CodePieces: React.FC = () => {
   // Add function to format text with basic highlighting
   const formatCodeContent = (code: string, language: string) => {
     if (language === "text") {
-      return code
+      return escapeHtml(code)
         // Highlight URLs
         .replace(
           /(https?:\/\/[^\s]+)/g,
@@ -786,7 +787,7 @@ const CodePieceCard: React.FC<CodePieceCardProps> = ({
   // Add function to format text content
   const formatCodeContent = (code: string, language: string) => {
     if (language === "text") {
-      return code
+      return escapeHtml(code)
         .replace(
           /(https?:\/\/[^\s]+)/g,
           '<span class="text-blue-600 underline cursor-pointer">$1</span>'
