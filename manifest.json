@@ -18,9 +18,6 @@
   },
   "background": { "service_worker": "background.js" },
   "permissions": ["debugger"],
-  "content_security_policy": {
-    "extension_pages": "script-src 'self'; object-src 'self';"
-  },
   "devtools_page": "devtools.html",
   "web_accessible_resources": [
     { "resources": ["panel.html", "panel.js"], "matches": ["<all_urls>"] }

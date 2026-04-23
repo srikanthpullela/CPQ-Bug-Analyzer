@@ -195,7 +195,7 @@ export const WsTableTab: React.FC<Props> = ({
       {!isMinimized && (
       <table className="min-w-full table-auto">
         <thead
-          className={`transition-colors duration-200 ${
+          className={`sticky top-0 z-10 transition-colors duration-200 ${
             isDarkMode ? "bg-gray-700" : "bg-gray-50"
           }`}
         >
@@ -262,6 +262,7 @@ export const WsTableTab: React.FC<Props> = ({
             return (
               <tr
                 key={w.id || i}
+                data-row-key={`ws-${i}`}
                 className={`transition-colors duration-200 cursor-pointer hover:${
                   isDarkMode ? "bg-gray-700" : "bg-blue-50"
                 } ${

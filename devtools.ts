@@ -4,6 +4,10 @@ const seenRequests = new Set<string>();
 const seenWsMessages = new Set<string>();
 // Track sent WS timestamps by TaskId for duration calculation
 const wsSentTimestamps: Record<string, number> = {};
+// Track WS connection URL per requestId so generic (non-Conga) messages can show it
+const wsUrlsByRequestId: Record<string, string> = {};
+// Latest WS connection URL seen (used as fallback for generic messages)
+let latestWsBaseUrl: string | null = null;
 let debuggerAttached = false;
 let wsFirstTimestamp: number | null = null;
 let wsFirstWallClock: number | null = null;
@@ -80,7 +84,7 @@ function injectWsInterceptor() {
   console.log("💉 Injecting WS interceptor into page...");
   chrome.devtools.inspectedWindow.eval(WS_INTERCEPTOR_SCRIPT, (result: any, isException: any) => {
     if (isException) {
-      console.warn("⚠️ WS interceptor injection failed:", isException);
+      console.log("⚠️ WS interceptor injection failed:", isException);
     } else {
       console.log("✅ WS interceptor:", result);
     }
@@ -108,7 +112,7 @@ function startWsPolling(panelWindow: any) {
             processInterceptedWsMessage(msg, pw);
           }
         } catch (e) {
-          console.warn("⚠️ Error processing interceptor WS messages:", e);
+          console.log("⚠️ Error processing interceptor WS messages:", e);
         }
       }
     );
@@ -163,7 +167,7 @@ function startDebuggerRetry(debuggee: any, panelWindow: any) {
             flatten: true,
           });
         } catch (e) {
-          console.warn("⚠️ Auto-retry: error enabling domains:", (e as any)?.message || e);
+          console.log("⚠️ Auto-retry: error enabling domains:", (e as any)?.message || e);
         }
 
         panelWindow.postMessage(
@@ -181,9 +185,10 @@ function processInterceptedWsMessage(msg: any, panelWindow: any) {
   if (!panelWindow) return;
   if (msg.direction === 'open') {
     panelWindow.postMessage({ source: "HAR_EXTRACTOR", type: "WS_BASE_URL", payload: msg.url }, "*");
-    // WS connection opened — lazily attach the debugger so Chrome's deeper
-    // Network.webSocketFrame* events are available going forward.
-    if (lazyAttachDebuggerFn) lazyAttachDebuggerFn();
+    if (msg.url) latestWsBaseUrl = msg.url;
+    // Do NOT attach the debugger here — the interceptor captures WS messages
+    // on its own. Attaching the debugger shows Chrome's "debugging this browser"
+    // bar which annoys users who don't need it.
     return;
   }
   if (msg.direction !== 'sent' && msg.direction !== 'received') return;
@@ -192,11 +197,18 @@ function processInterceptedWsMessage(msg: any, panelWindow: any) {
   if (!rawPayload) return;
 
   let topLevel: any = {};
+  let isRawMessage = false;
   try {
     topLevel = JSON.parse(rawPayload);
   } catch {
     const cleaned = String(rawPayload).replace(/^\uFEFF/, '').trim();
-    try { topLevel = JSON.parse(cleaned); } catch { return; }
+    try {
+      topLevel = JSON.parse(cleaned);
+    } catch {
+      // Non-JSON message — treat as generic raw WS payload.
+      isRawMessage = true;
+      topLevel = { _raw: String(rawPayload).slice(0, 5000) };
+    }
   }
 
   if (wsFirstTimestamp === null) {
@@ -210,11 +222,37 @@ function processInterceptedWsMessage(msg: any, panelWindow: any) {
       ? JSON.parse(topLevel.Payload) : topLevel.Payload;
   } catch {}
 
-  const action = (nested?.Action || topLevel?.Action || "").toLowerCase();
-  if (action === "heartbeat") return;
+  // Detect Conga envelope
+  const isCongaEnvelope = !isRawMessage && (
+    topLevel.EndPoint !== undefined ||
+    topLevel.TaskId !== undefined ||
+    topLevel.Action !== undefined ||
+    nested?.Action !== undefined
+  );
 
-  const endpoint = topLevel.EndPoint || (topLevel.TaskId ? `TaskId: ${topLevel.TaskId}` : "(unknown)");
-  const status = topLevel.StatusCode ?? 200;
+  const action = isCongaEnvelope
+    ? (nested?.Action || topLevel?.Action || "").toLowerCase()
+    : msg.direction;
+  if (isCongaEnvelope && action === "heartbeat") return;
+
+  const endpoint = isCongaEnvelope
+    ? (topLevel.EndPoint || (topLevel.TaskId ? `TaskId: ${topLevel.TaskId}` : "(unknown)"))
+    : (() => {
+        const connUrl = msg.url || latestWsBaseUrl;
+        if (connUrl) {
+          // Broadcast so the header shows the URL even on pre-existing connections
+          panelWindow.postMessage(
+            { source: "HAR_EXTRACTOR", type: "WS_BASE_URL", payload: connUrl },
+            "*"
+          );
+          try {
+            const u = new URL(connUrl);
+            return u.pathname || connUrl;
+          } catch { return connUrl; }
+        }
+        return "(message)";
+      })();
+  const status = isCongaEnvelope ? (topLevel.StatusCode ?? 200) : 200;
   const timestamp = new Date(msg.timestamp);
 
   const key = `int-${msg.timestamp}-${action}-${msg.direction}-${endpoint}`;
@@ -309,11 +347,11 @@ function getUrlPatternsFromStorage(): UrlPattern[] {
     if (stored === null) {
       console.log('📝 No localStorage key found - this is first time setup');
     } else {
-      console.warn('⚠️ Invalid or corrupted localStorage data detected - using defaults');
+      console.log('⚠️ Invalid or corrupted localStorage data detected - using defaults');
     }
   } catch (error) {
-    console.warn('⚠️ getUrlPatternsFromStorage: Error reading patterns:', error);
-    console.warn('⚠️ Falling back to default patterns');
+    console.log('⚠️ getUrlPatternsFromStorage: Error reading patterns:', error);
+    console.log('⚠️ Falling back to default patterns');
   }
   
   // Only set defaults if localStorage key doesn't exist at all (first time)
@@ -323,7 +361,7 @@ function getUrlPatternsFromStorage(): UrlPattern[] {
   try {
     const doubleCheck = localStorage.getItem('har_extractor_url_patterns');
     if (doubleCheck !== null) {
-      console.warn('⚠️ Race condition detected - localStorage was set between reads, not overwriting');
+      console.log('⚠️ Race condition detected - localStorage was set between reads, not overwriting');
       try {
         const raceConditionPatterns = JSON.parse(doubleCheck);
         return raceConditionPatterns;
@@ -332,7 +370,7 @@ function getUrlPatternsFromStorage(): UrlPattern[] {
       }
     }
   } catch (error) {
-    console.warn('⚠️ Error in double-check, proceeding with defaults');
+    console.log('⚠️ Error in double-check, proceeding with defaults');
   }
   
   saveUrlPatternsToStorage(defaults);
@@ -349,11 +387,29 @@ function saveUrlPatternsToStorage(patterns: UrlPattern[]): void {
       throw new Error('Failed to verify localStorage save - data not found');
     }
   } catch (error) {
-    console.error('❌ saveUrlPatternsToStorage: Error saving patterns:', error);
+    console.log('❌ saveUrlPatternsToStorage: Error saving patterns:', error);
   }
 }
 
+// Generic fallback pattern used when no user-configured pattern matches.
+// Ensures non-Conga HTTP traffic is still captured and displayed.
+const GENERIC_HTTP_PATTERN: UrlPattern = {
+  name: "Generic",
+  pattern: "*",
+  type: "generic",
+  enabled: true,
+  description: "Generic HTTP requests (fallback for non-Conga traffic)"
+};
+
 function shouldProcessUrl(url: string): UrlPattern | null {
+  // Skip internal / non-network URLs entirely
+  if (!url) return null;
+  const lowerUrl = url.toLowerCase();
+  const skipSchemes = ['chrome-extension://', 'chrome://', 'devtools://', 'data:', 'blob:', 'file:', 'about:'];
+  if (skipSchemes.some(s => lowerUrl.startsWith(s))) {
+    return null;
+  }
+
   // Filter out only static assets, accept all API calls
   const staticAssetExtensions = [
     '.js', '.css', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', 
@@ -377,13 +433,20 @@ function shouldProcessUrl(url: string): UrlPattern | null {
   // Get current patterns and find a match
   const currentPatterns = getUrlPatternsFromStorage();
   const enabledPatterns = currentPatterns.filter(p => p.enabled);
-  
-  const matchedPattern = enabledPatterns.find(pattern => {
-    const patternLower = pattern.pattern.toLowerCase();
-    return url.toLowerCase().includes(patternLower);
-  });
 
-  return matchedPattern || null;
+  // If the user has configured any enabled patterns, filter strictly — only
+  // show requests that match one of them. Drop everything else (Conga-style).
+  if (enabledPatterns.length > 0) {
+    const matchedPattern = enabledPatterns.find(pattern => {
+      const patternLower = pattern.pattern.toLowerCase();
+      return url.toLowerCase().includes(patternLower);
+    });
+    return matchedPattern || null;
+  }
+
+  // No enabled patterns configured — fall back to the generic pattern so all
+  // HTTP traffic is captured (for non-Conga / general debugging use).
+  return GENERIC_HTTP_PATTERN;
 }
 
 function extractEndpointFromUrl(url: string): string {
@@ -467,12 +530,17 @@ function processRequestByPattern(request: any, reqJson: any, resJson: any, patte
       };
     
     case 'generic':
-    default:
+    default: {
+      // Generic HTTP: show "VERB /path" as the method — like DevTools Network panel.
+      const genericEndpoint = extractEndpointFromUrl(request.request.url);
+      const genericMethod = `${httpMethod} /${genericEndpoint}`.replace(/\/+/g, '/').replace(/\/$/, '');
       return {
         ...basePayload,
-        method: request.request.method || reqJson.method || "(unknown)",
-        displayName: `${pattern.name}: ${request.request.method || "(unknown)"}`
+        method: genericMethod,
+        endpoint: genericEndpoint,
+        displayName: genericMethod
       };
+    }
   }
 }
 
@@ -632,7 +700,7 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
                 return "Fetch completed successfully";
               })
               .catch(error => {
-                console.error("[HAR_RETRIGGER] Fetch error:", error);
+                console.log("[HAR_RETRIGGER] Fetch error:", error);
                 window.postMessage({ 
                   source: "HAR_EXTRACTOR", 
                   type: "HAR_RETRIGGER_RESPONSE", 
@@ -646,7 +714,7 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
         console.log("🔄 Evaluating script in inspected window for tab:", currentTabId);
         chrome.devtools.inspectedWindow.eval(evalScript, (result: any, isException: any) => {
           if (isException) {
-            console.error("🔄 Error evaluating script:", isException);
+            console.log("🔄 Error evaluating script:", isException);
           } else {
             console.log("🔄 Script evaluation result:", result);
           }
@@ -684,10 +752,10 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
       chrome.debugger.attach(debuggee, "1.3", () => {
         if (chrome.runtime.lastError) {
           const errorMessage = chrome.runtime.lastError.message;
-          console.error("❌ Failed to attach debugger:", errorMessage);
+          console.log("❌ Failed to attach debugger:", errorMessage);
 
           if (errorMessage.includes("different extension")) {
-            console.warn("🚨 Another extension is using the debugger. WS interceptor remains active as fallback.");
+            console.log("🚨 Another extension is using the debugger. WS interceptor remains active as fallback.");
             panelWindow.postMessage(
               {
                 source: "HAR_EXTRACTOR",
@@ -730,7 +798,7 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
           chrome.debugger.sendCommand(debuggee, "Network.setCacheDisabled", { cacheDisabled: true });
           chrome.debugger.sendCommand(debuggee, "Page.enable", {});
         } catch (e) {
-          console.warn("⚠️ Error enabling domains after attach:", (e as any)?.message || e);
+          console.log("⚠️ Error enabling domains after attach:", (e as any)?.message || e);
         }
 
         chrome.debugger.sendCommand(
@@ -739,7 +807,7 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
           { autoAttach: true, waitForDebuggerOnStart: false, flatten: true },
           () => {
             if (chrome.runtime.lastError) {
-              console.warn("⚠️ setAutoAttach error:", chrome.runtime.lastError.message);
+              console.log("⚠️ setAutoAttach error:", chrome.runtime.lastError.message);
             } else {
               console.log("🎯 Target.setAutoAttach enabled");
             }
@@ -768,7 +836,7 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
       // Listen for debugger detach events
       chrome.debugger.onDetach.addListener((detachedDebuggee: any, reason: string) => {
         if (detachedDebuggee.tabId === currentTabId) {
-          console.warn("🔌 Debugger detached:", reason);
+          console.log("🔌 Debugger detached:", reason);
           debuggerAttached = false;
           panelWindow.postMessage(
             { source: "HAR_EXTRACTOR", type: "DEBUGGER_DISCONNECTED" },
@@ -776,7 +844,9 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
           );
           debuggerWsActive = false;
           injectWsInterceptor();
-          startDebuggerRetry(debuggee, panelWindow);
+          // Do NOT auto-retry — let the user manually reconnect from the WS table overlay.
+          // Auto-retry causes the annoying "debugging this browser" bar to reappear.
+          stopDebuggerRetry();
         }
       });
     }
@@ -787,6 +857,13 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
     // Always rebind the listener safely
     chrome.debugger.onEvent.removeListener(handleEvent);
     chrome.debugger.onEvent.addListener(handleEvent);
+
+    // Eagerly attach debugger so WS frames on existing connections are captured.
+    // The page-level interceptor can only catch NEW WebSocket() calls, but
+    // Salesforce/CPQ pages open WS connections on page load — before the panel
+    // is shown — so the interceptor misses them. The debugger API hooks into
+    // Chrome's network layer and captures frames on all connections.
+    attachDebuggerForWs();
 
     // WS Interceptor Fallback: always inject + poll so WS works even without debugger
     currentPanelWindow = panelWindow;
@@ -927,7 +1004,7 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
             handleEvent(source, inner.method, inner.params || {});
           }
         } catch (err) {
-          console.warn("⚠️ Failed to parse receivedMessageFromTarget payload");
+          console.log("⚠️ Failed to parse receivedMessageFromTarget payload");
         }
         return; // We've delegated handling
       }
@@ -951,14 +1028,14 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
               { maxTotalBufferSize: 100_000_000, maxResourceBufferSize: 50_000_000 },
               () => {
                 if (chrome.runtime.lastError) {
-                  console.warn("⚠️ Network.enable on child session failed:", chrome.runtime.lastError.message);
+                  console.log("⚠️ Network.enable on child session failed:", chrome.runtime.lastError.message);
                 } else {
                   console.log("✅ Network.enable on child session:", sessionId);
                 }
               }
             );
           } catch (e) {
-            console.warn("⚠️ Error enabling Network on child session:", (e as any)?.message || e);
+            console.log("⚠️ Error enabling Network on child session:", (e as any)?.message || e);
           }
         } else {
           // Fallback: try sending to the child target directly via flat session
@@ -1072,10 +1149,30 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
       }
 
       // Additional WS lifecycle diagnostics to understand connection state
+      if (method === "Network.webSocketCreated") {
+        const wsUrl = params?.url;
+        const reqId = params?.requestId;
+        console.log("🔗 WS created:", { url: wsUrl, requestId: reqId });
+        if (wsUrl) {
+          if (reqId) wsUrlsByRequestId[reqId] = wsUrl;
+          latestWsBaseUrl = wsUrl;
+          panelWindow.postMessage(
+            { source: "HAR_EXTRACTOR", type: "WS_BASE_URL", payload: wsUrl },
+            "*"
+          );
+        }
+        return;
+      }
       if (method === "Network.webSocketWillSendHandshakeRequest") {
         const wsUrl = params?.request?.url;
         console.log("🤝 WS handshake request:", { url: wsUrl, requestId: params?.requestId });
         
+        // Track WS URL per requestId so generic WS messages can show the connection URL
+        if (wsUrl && params?.requestId) {
+          wsUrlsByRequestId[params.requestId] = wsUrl;
+          latestWsBaseUrl = wsUrl;
+        }
+
         // Send the WebSocket base URL to the panel
         if (wsUrl) {
           panelWindow.postMessage(
@@ -1108,7 +1205,7 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
 
       // Log WS errors explicitly
       if (method === "Network.webSocketFrameError") {
-        console.warn("❌ WebSocket frame error:", params);
+        console.log("❌ WebSocket frame error:", params);
         scheduleHarReload();
         return;
       }
@@ -1150,23 +1247,25 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
         
         if (!rawPayload) {
           if (navigator.userAgent.includes('Windows')) {
-            console.warn(`⚠️ Windows Chrome: No payload data in ${direction} WebSocket frame`);
+            console.log(`⚠️ Windows Chrome: No payload data in ${direction} WebSocket frame`);
           }
           return;
         }
 
         let topLevel: any = {};
+        let isRawMessage = false;
         try {
           // Try normal JSON parse
           topLevel = JSON.parse(rawPayload);
         } catch {
-          // Fallback: strip BOM/whitespace and retry; if still fails, filter out raw messages
+          // Fallback: strip BOM/whitespace and retry
           const cleaned = String(rawPayload).replace(/^\uFEFF/, '').trim();
           try {
             topLevel = JSON.parse(cleaned);
           } catch {
-            // Filter out raw WebSocket messages (heartbeat, connection checks, etc.)
-            return;
+            // Non-JSON message — treat as generic raw WS payload.
+            isRawMessage = true;
+            topLevel = { _raw: String(rawPayload).slice(0, 5000) };
           }
         }
 
@@ -1195,13 +1294,39 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
           }
         }
 
-        const action = (nested?.Action || topLevel?.Action || "").toLowerCase();
-        if (action === "heartbeat") return;
+        // Detect Conga envelope: has EndPoint, TaskId, or Action at top level.
+        const isCongaEnvelope = !isRawMessage && (
+          topLevel.EndPoint !== undefined ||
+          topLevel.TaskId !== undefined ||
+          topLevel.Action !== undefined ||
+          nested?.Action !== undefined
+        );
 
-        const endpoint =
-          topLevel.EndPoint ||
-          (topLevel.TaskId ? `TaskId: ${topLevel.TaskId}` : "(unknown)");
-        const status = topLevel.StatusCode ?? 200;
+        const action = isCongaEnvelope
+          ? (nested?.Action || topLevel?.Action || "").toLowerCase()
+          : direction; // Generic WS: use direction as the "action" label
+        if (isCongaEnvelope && action === "heartbeat") return;
+
+        const endpoint = isCongaEnvelope
+          ? (topLevel.EndPoint ||
+             (topLevel.TaskId ? `TaskId: ${topLevel.TaskId}` : "(unknown)"))
+          : (() => {
+              // Generic WS: show connection URL path
+              const connUrl = (params?.requestId && wsUrlsByRequestId[params.requestId]) || latestWsBaseUrl;
+              if (connUrl) {
+                // Also broadcast as WS_BASE_URL so the connection header shows it
+                panelWindow.postMessage(
+                  { source: "HAR_EXTRACTOR", type: "WS_BASE_URL", payload: connUrl },
+                  "*"
+                );
+                try {
+                  const u = new URL(connUrl);
+                  return u.pathname || connUrl;
+                } catch { return connUrl; }
+              }
+              return "(message)";
+            })();
+        const status = isCongaEnvelope ? (topLevel.StatusCode ?? 200) : 200;
 
         const baseTime = Date.now() - performance.now();
         const timestamp =
@@ -1293,9 +1418,10 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
     const startWsWatchdog = () => {
       // First check at 5.5s
       setTimeout(() => {
+        if (!debuggerAttached) return; // Debugger was detached, skip
         const inactive = !lastWsEventTime || (Date.now() - lastWsEventTime > 5500);
         if (inactive) {
-          console.warn("⏱️ WS inactivity detected - re-enabling Network/Targets");
+          console.log("⏱️ WS inactivity detected - re-enabling Network/Targets");
           try {
             chrome.debugger.sendCommand(debuggee, "Network.enable", {
               maxTotalBufferSize: 100_000_000,
@@ -1310,12 +1436,14 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
 
       // Second deeper check at 12s — also try non-flattened mode and re-enable on all known sub-targets
       setTimeout(() => {
+        if (!debuggerAttached) return; // Debugger was detached, skip
         const stillInactive = !lastWsEventTime || (Date.now() - lastWsEventTime > 11000);
         if (stillInactive) {
-          console.warn("⏱️ WS still inactive after 12s — trying deeper recovery");
+          console.log("⏱️ WS still inactive after 12s — trying deeper recovery");
           try {
             // Disable then re-enable Network to force Chrome to re-emit WS events
             chrome.debugger.sendCommand(debuggee, "Network.disable", {}, () => {
+              if (!debuggerAttached) return;
               chrome.debugger.sendCommand(debuggee, "Network.enable", {
                 maxTotalBufferSize: 100_000_000,
                 maxResourceBufferSize: 50_000_000
@@ -1643,7 +1771,7 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
             }
             
           } catch (error) {
-            console.error('❌ Error saving patterns:', error);
+            console.log('❌ Error saving patterns:', error);
             panelWindow.postMessage(
               { 
                 source: "HAR_EXTRACTOR", 
@@ -1655,7 +1783,7 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
             );
           }
         } else {
-          console.error("💾 Invalid patterns data:", event.data.patterns);
+          console.log("💾 Invalid patterns data:", event.data.patterns);
           panelWindow.postMessage(
             { 
               source: "HAR_EXTRACTOR", 
@@ -1707,7 +1835,7 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
             chrome.debugger.attach(debuggee, "1.3", () => {
               if (chrome.runtime.lastError) {
                 const errorMessage = chrome.runtime.lastError.message;
-                console.warn(`❌ Attempt ${attempt} failed:`, errorMessage);
+                console.log(`❌ Attempt ${attempt} failed:`, errorMessage);
                 
                 // Handle specific error cases with different strategies
                 if (errorMessage.includes("different extension")) {
@@ -1791,7 +1919,7 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
                 
                 console.log("✅ Windows Chrome state cleanup completed");
               } catch (error) {
-                console.warn("⚠️ State cleanup failed:", (error as any)?.message);
+                console.log("⚠️ State cleanup failed:", (error as any)?.message);
               }
             }
             
@@ -1816,7 +1944,7 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
                 { autoAttach: true, waitForDebuggerOnStart: false, flatten: true },
                 () => {
                   if (chrome.runtime.lastError) {
-                    console.warn("⚠️ setAutoAttach error:", chrome.runtime.lastError.message);
+                    console.log("⚠️ setAutoAttach error:", chrome.runtime.lastError.message);
                   } else {
                     console.log("🎯 Target.setAutoAttach enabled");
                   }
@@ -1891,7 +2019,7 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
                 { autoAttach: true, waitForDebuggerOnStart: false, flatten: true },
                 () => {
                   if (chrome.runtime.lastError) {
-                    console.warn("⚠️ setAutoAttach error:", chrome.runtime.lastError.message);
+                    console.log("⚠️ setAutoAttach error:", chrome.runtime.lastError.message);
                   } else {
                     console.log("🎯 Target.setAutoAttach enabled");
                   }
@@ -1911,7 +2039,7 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
               );
               console.log("✅ All debugger commands sent successfully");
             } catch (error) {
-              console.warn("⚠️ Command sending failed:", (error as any)?.message || error);
+              console.log("⚠️ Command sending failed:", (error as any)?.message || error);
             }
             
             // Notify panel that debugger is reconnected

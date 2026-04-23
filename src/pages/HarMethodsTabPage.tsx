@@ -1,7 +1,7 @@
 "use client";
 
 import type React from "react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useFieldHistory } from "../hooks/useFieldHistory";
 import { DetailPanel } from "./components/DetailPanel";
 import { HeaderSection } from "./components/HeaderSection";
@@ -37,6 +37,10 @@ const HarMethodsTabPage: React.FC = () => {
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
   const [urlPatternSettingsOpen, setUrlPatternSettingsOpen] = useState(false);
   const [showClearConfirmation, setShowClearConfirmation] = useState(false);
+
+  // Auto-scroll state
+  const [autoScroll, setAutoScroll] = useState(false);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
 
   // Dark mode state
   const [isDarkMode, setIsDarkMode] = useState(() => {
@@ -222,6 +226,105 @@ const HarMethodsTabPage: React.FC = () => {
   const filteredHttpCount = httpRows.filter(filterFunction).length;
   const filteredWsCount = wsRows.filter(filterFunction).length;
 
+  // Arrow-key navigation: move selection up/down between filtered rows and
+  // load the corresponding data into the detail panel.
+  const filteredHttpRows = useMemo(
+    () => httpRows.filter(filterFunction),
+    [httpRows, searchTerm]
+  );
+  const filteredWsRows = useMemo(
+    () => wsRows.filter(filterFunction),
+    [wsRows, searchTerm]
+  );
+
+  useEffect(() => {
+    if (!panelOpen || !selectedRowKey) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key !== "ArrowUp" && e.key !== "ArrowDown") return;
+      // Don't hijack arrow keys while the user is typing in an input/textarea
+      const target = e.target as HTMLElement;
+      const tag = target?.tagName;
+      if (
+        tag === "INPUT" ||
+        tag === "TEXTAREA" ||
+        target?.isContentEditable
+      ) {
+        return;
+      }
+
+      const [type, indexStr] = selectedRowKey.split("-");
+      const index = parseInt(indexStr, 10);
+      if (isNaN(index)) return;
+
+      const list = type === "http" ? filteredHttpRows : filteredWsRows;
+      if (list.length === 0) return;
+
+      const delta = e.key === "ArrowDown" ? 1 : -1;
+      const nextIndex = Math.max(0, Math.min(list.length - 1, index + delta));
+      if (nextIndex === index) return;
+
+      e.preventDefault();
+      const nextRow = list[nextIndex];
+      if (!nextRow) return;
+
+      if (type === "http") {
+        const r: any = nextRow;
+        const isHttpLike = r.patternType === "http" || r.patternType === "generic";
+        const title = isHttpLike ? r.endpoint || r.method : r.method;
+        handleView(`http-${nextIndex}`, title, {
+          _rowType: "http",
+          method: r.method,
+          time: r.time,
+          status: r.status,
+          patternType: r.patternType,
+          httpMethod: r.httpMethod,
+          endpoint: r.endpoint,
+          urlPattern: r.urlPattern,
+          displayName: r.displayName,
+          hasMessages: r.hasMessages,
+          startTime: r.startTime,
+          endTime: r.endTime,
+          requestPayload: r.requestPayload,
+          responsePayload: r.responsePayload,
+          headers: r.headers,
+        });
+      } else {
+        const r: any = nextRow;
+        handleView(`ws-${nextIndex}`, r.endpoint || r.action || "WebSocket", {
+          _rowType: "ws",
+          endpoint: r.endpoint,
+          action: r.action,
+          payload: r.payload,
+          status: r.status,
+          direction: r.direction,
+          time: r.time,
+          timestamp: r.timestamp,
+          duration: r.duration,
+          headers: r.headers,
+        });
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [panelOpen, selectedRowKey, filteredHttpRows, filteredWsRows]);
+
+  // Scroll the selected row into view whenever the selection changes.
+  useEffect(() => {
+    if (!selectedRowKey) return;
+    const el = document.querySelector(`[data-row-key="${selectedRowKey}"]`);
+    if (el && typeof (el as any).scrollIntoView === "function") {
+      (el as any).scrollIntoView({ block: "nearest", behavior: "smooth" });
+    }
+  }, [selectedRowKey]);
+
+  // Auto-scroll to bottom when new rows arrive
+  useEffect(() => {
+    if (!autoScroll || !scrollContainerRef.current) return;
+    scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+  }, [autoScroll, httpRows.length, wsRows.length]);
+
   return (
     <div
       className={`h-screen Har-tab-container transition-colors duration-200 ${
@@ -263,7 +366,7 @@ const HarMethodsTabPage: React.FC = () => {
             </div>
 
             {/* Scrollable Content Area */}
-            <div className="flex-1 overflow-auto">
+            <div className="flex-1 overflow-auto" ref={scrollContainerRef}>
               <div className="p-1 space-y-1 pb-4">
                 <Toaster position="top-right" />
 
@@ -279,6 +382,8 @@ const HarMethodsTabPage: React.FC = () => {
                   onView={handleView}
                   isLoading={isLoading}
                   panelOpen={panelOpen}
+                  autoScroll={autoScroll}
+                  onToggleAutoScroll={() => setAutoScroll(!autoScroll)}
                 />
               </div>
             </div>

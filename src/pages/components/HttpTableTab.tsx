@@ -36,6 +36,8 @@ interface Props {
   headerTitle?: string;
   isLoading?: boolean;
   panelOpen?: boolean;
+  autoScroll?: boolean;
+  onToggleAutoScroll?: () => void;
 }
 
 export const HttpTableTab: React.FC<Props> = ({
@@ -47,6 +49,8 @@ export const HttpTableTab: React.FC<Props> = ({
   headerTitle = "API Methods",
   isLoading = false,
   panelOpen = false,
+  autoScroll = false,
+  onToggleAutoScroll,
 }) => {
   // Add state for minimizing/expanding the table
   const [isMinimized, setIsMinimized] = useState(false);
@@ -339,32 +343,54 @@ export const HttpTableTab: React.FC<Props> = ({
       }`}>
         <div className="flex items-center justify-between">
           <span>{headerTitle}</span>
-          <button
-            onClick={() => setIsMinimized(!isMinimized)}
-            className={`ml-2 p-1 rounded transition-colors duration-200 ${
-              isDarkMode
-                ? "hover:bg-gray-600 text-gray-300 hover:text-gray-100"
-                : "hover:bg-gray-200 text-gray-600 hover:text-gray-800"
-            }`}
-            title={isMinimized ? "+" : "-"}
-          >
-            {isMinimized ? (
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-              </svg>
-            ) : (
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 12H6" />
-              </svg>
+          <div className="flex items-center gap-1">
+            {/* Auto-scroll toggle */}
+            {onToggleAutoScroll && (
+              <button
+                onClick={onToggleAutoScroll}
+                className={`p-1 rounded transition-colors duration-200 ${
+                  autoScroll
+                    ? isDarkMode
+                      ? "bg-blue-600 text-white hover:bg-blue-500"
+                      : "bg-blue-500 text-white hover:bg-blue-600"
+                    : isDarkMode
+                    ? "hover:bg-gray-600 text-gray-300 hover:text-gray-100"
+                    : "hover:bg-gray-200 text-gray-600 hover:text-gray-800"
+                }`}
+                title={autoScroll ? "Auto-scroll ON" : "Auto-scroll OFF"}
+              >
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 14l-7 7m0 0l-7-7m7 7V3" />
+                </svg>
+              </button>
             )}
-          </button>
+            <button
+              onClick={() => setIsMinimized(!isMinimized)}
+              className={`p-1 rounded transition-colors duration-200 ${
+                isDarkMode
+                  ? "hover:bg-gray-600 text-gray-300 hover:text-gray-100"
+                  : "hover:bg-gray-200 text-gray-600 hover:text-gray-800"
+              }`}
+              title={isMinimized ? "+" : "-"}
+            >
+              {isMinimized ? (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                </svg>
+              ) : (
+                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 12H6" />
+                </svg>
+              )}
+            </button>
+          </div>
         </div>
       </h3>
       
       {/* Conditionally render the table based on isMinimized state */}
       {!isMinimized && (
       <table className="min-w-full table-auto">
-        <thead className={`transition-colors duration-200 ${
+        <thead className={`sticky top-0 z-10 transition-colors duration-200 ${
           isDarkMode ? "bg-gray-700" : "bg-gray-50"
         }`}>
           <tr>
@@ -390,6 +416,9 @@ export const HttpTableTab: React.FC<Props> = ({
                 }`}>Type</th>
                 <th className={`px-2 py-0.5 text-left text-xs font-medium transition-colors duration-200 ${
                   isDarkMode ? "text-gray-200" : "text-gray-700"
+                }`}>Duration</th>
+                <th className={`px-2 py-0.5 text-left text-xs font-medium transition-colors duration-200 ${
+                  isDarkMode ? "text-gray-200" : "text-gray-700"
                 }`}>Status</th>
               </>
             )}
@@ -399,6 +428,7 @@ export const HttpTableTab: React.FC<Props> = ({
           {displayRows.map((gr, i) => (
             <tr
               key={gr.id || i}
+              data-row-key={`http-${i}`}
               className={`transition-colors duration-200 cursor-pointer hover:${
                 isDarkMode ? "bg-gray-700" : "bg-blue-50"
               } ${
@@ -421,9 +451,10 @@ export const HttpTableTab: React.FC<Props> = ({
               }`}
               style={getRowInlineStyle(gr)}
               onClick={() => {
+                const isHttpLike = gr.patternType === 'http' || gr.patternType === 'generic';
                 onView(
                   `http-${i}`,
-                  gr.patternType === 'http' ? gr.endpoint || gr.method : gr.method,
+                  isHttpLike ? gr.endpoint || gr.method : gr.method,
                   {
                     _rowType: 'http',
                     method: gr.method,
@@ -458,9 +489,9 @@ export const HttpTableTab: React.FC<Props> = ({
                 isDarkMode 
                   ? "text-gray-200" 
                   : "text-gray-700"
-              }`} title={gr.patternType === 'http' ? gr.endpoint || gr.method : gr.method}>
+              }`} title={(gr.patternType === 'http' || gr.patternType === 'generic') ? gr.endpoint || gr.method : gr.method}>
                 <div className="truncate max-w-xs">
-                  {gr.patternType === 'http' ? gr.endpoint || gr.method : gr.method}
+                  {(gr.patternType === 'http' || gr.patternType === 'generic') ? gr.method || gr.endpoint : gr.method}
                 </div>
               </td>
               {!panelOpen && (
@@ -473,16 +504,38 @@ export const HttpTableTab: React.FC<Props> = ({
                         ? isDarkMode 
                           ? "border-purple-600 text-purple-300 bg-purple-900/20" 
                           : "border-purple-300 text-purple-700 bg-purple-50/50"
-                        : gr.patternType === 'http'
+                        : (gr.patternType === 'http' || gr.patternType === 'generic')
                         ? isDarkMode 
                           ? "border-green-600 text-green-300 bg-green-900/20" 
                           : "border-green-300 text-green-700 bg-green-50/50"
                         : isDarkMode 
                           ? "border-gray-600 text-gray-300 bg-gray-800/20" 
                           : "border-gray-300 text-gray-600 bg-gray-50/50"
-                    }`} title={gr.patternType === 'http' ? `${gr.httpMethod || 'HTTP'} - ${gr.urlPattern || 'HTTP API'}` : gr.urlPattern || 'Unknown'}>
-                      {gr.patternType === 'http' ? gr.httpMethod || 'HTTP' : gr.urlPattern || 'Unknown'}
+                    }`} title={(gr.patternType === 'http' || gr.patternType === 'generic') ? `${gr.httpMethod || 'HTTP'} - ${gr.urlPattern || 'HTTP API'}` : gr.urlPattern || 'Unknown'}>
+                      {(gr.patternType === 'http' || gr.patternType === 'generic') ? gr.httpMethod || 'HTTP' : gr.urlPattern || 'Unknown'}
                     </span>
+                  </td>
+                  <td className={`px-2 py-0.5 text-xs whitespace-nowrap transition-colors duration-200 ${
+                    isDarkMode ? "text-gray-200" : "text-gray-700"
+                  }`}>
+                    {gr.endTime && gr.startTime ? (
+                      <span className={`text-[11px] font-medium ${
+                        (() => {
+                          const ms = gr.endTime - gr.startTime;
+                          if (ms > 5000) return isDarkMode ? "text-red-400" : "text-red-600";
+                          if (ms > 1000) return isDarkMode ? "text-orange-400" : "text-orange-600";
+                          return isDarkMode ? "text-gray-400" : "text-gray-500";
+                        })()
+                      }`} title={`${Math.round(gr.endTime - gr.startTime)}ms`}>
+                        {(() => {
+                          const ms = Math.round(gr.endTime - gr.startTime);
+                          if (ms >= 1000) return `${(ms / 1000).toFixed(1)}s`;
+                          return `${ms}ms`;
+                        })()}
+                      </span>
+                    ) : (
+                      <span className={isDarkMode ? "text-gray-500" : "text-gray-400"}>–</span>
+                    )}
                   </td>
                   <td className={`px-2 py-0.5 text-xs transition-colors duration-200 ${
                     isDarkMode ? "text-gray-200" : "text-gray-700"

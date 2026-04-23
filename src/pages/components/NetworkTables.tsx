@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useState, useEffect } from "react";
 import { HttpTableTab } from "./HttpTableTab";
 import { WsTableTab } from "./WsTableTab";
 
@@ -38,6 +38,8 @@ interface NetworkTablesProps {
   onView: (rowKey: string, title: string, data: any) => void;
   isLoading?: boolean;
   panelOpen?: boolean;
+  autoScroll?: boolean;
+  onToggleAutoScroll?: () => void;
 }
 
 export const NetworkTables: React.FC<NetworkTablesProps> = ({
@@ -51,7 +53,37 @@ export const NetworkTables: React.FC<NetworkTablesProps> = ({
   onView,
   isLoading = false,
   panelOpen = false,
+  autoScroll = false,
+  onToggleAutoScroll,
 }) => {
+  // Track debugger connection state for WS reconnect overlay
+  const [debuggerDisconnected, setDebuggerDisconnected] = useState(false);
+  const [isReconnecting, setIsReconnecting] = useState(false);
+
+  useEffect(() => {
+    const handleMessage = (event: MessageEvent) => {
+      if (event.data?.source !== "HAR_EXTRACTOR") return;
+      if (event.data.type === "DEBUGGER_DISCONNECTED") {
+        setDebuggerDisconnected(true);
+        setIsReconnecting(false);
+      } else if (event.data.type === "DEBUGGER_RECONNECTED") {
+        setDebuggerDisconnected(false);
+        setIsReconnecting(false);
+      }
+    };
+    window.addEventListener("message", handleMessage);
+    return () => window.removeEventListener("message", handleMessage);
+  }, []);
+
+  const handleReconnectWs = () => {
+    setIsReconnecting(true);
+    window.postMessage(
+      { source: "HAR_EXTRACTOR", type: "RECONNECT_DEBUGGER" },
+      "*"
+    );
+    setTimeout(() => setIsReconnecting(false), 10000);
+  };
+
   // Create a utility function for consistent filtering
   const createFilterFunction = (searchTerm: string) => {
     if (!searchTerm.trim()) return () => true;
@@ -174,21 +206,132 @@ export const NetworkTables: React.FC<NetworkTablesProps> = ({
         headerTitle={`HTTP Requests (${filteredHttpRows.length}/${httpRows.length})`}
         isLoading={isLoading}
         panelOpen={panelOpen}
+        autoScroll={autoScroll}
+        onToggleAutoScroll={onToggleAutoScroll}
       />
 
-      {/* WebSocket Table */}
+      {/* WebSocket Table with reconnect overlay */}
       {wsRows.length > 0 && (
-        <WsTableTab
-          rows={filteredWsRows}
-          baseUrl={wsBaseUrl}
-          filter="" // Pass empty since we're pre-filtering
-          selectedRowKey={selectedRowKey}
-          onView={onView}
-          isDarkMode={isDarkMode}
-          headerTitle={`WebSocket Messages (${filteredWsRows.length}/${wsRows.length})`}
-          isLoading={isLoading}
-          panelOpen={panelOpen}
-        />
+        <div className="relative" style={{ isolation: "isolate" }}>
+          <WsTableTab
+            rows={filteredWsRows}
+            baseUrl={wsBaseUrl}
+            filter="" // Pass empty since we're pre-filtering
+            selectedRowKey={selectedRowKey}
+            onView={onView}
+            isDarkMode={isDarkMode}
+            headerTitle={`WebSocket Messages (${filteredWsRows.length}/${wsRows.length})`}
+            isLoading={isLoading}
+            panelOpen={panelOpen}
+          />
+
+          {/* Blur overlay on WS table body — header & connection bar stay visible */}
+          {debuggerDisconnected && (
+            <div
+              className="absolute left-0 right-0 bottom-0 z-50 flex items-center justify-center rounded-b-lg"
+              style={{
+                top: "58px", // Skip header (28px) + connection bar (30px)
+                backdropFilter: "blur(6px)",
+                WebkitBackdropFilter: "blur(6px)",
+                backgroundColor: isDarkMode
+                  ? "rgba(17, 24, 39, 0.85)"
+                  : "rgba(255, 255, 255, 0.85)",
+              }}
+            >
+              <div className="flex flex-col items-center gap-4 p-6">
+                <div
+                  className={`w-14 h-14 rounded-full flex items-center justify-center ${
+                    isDarkMode ? "bg-yellow-900/50" : "bg-yellow-100"
+                  }`}
+                >
+                  <svg
+                    className="w-7 h-7"
+                    fill="none"
+                    stroke={isDarkMode ? "#facc15" : "#ca8a04"}
+                    viewBox="0 0 24 24"
+                    strokeWidth={1.5}
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"
+                    />
+                  </svg>
+                </div>
+                <h3
+                  className={`text-base font-semibold ${
+                    isDarkMode ? "text-gray-100" : "text-gray-800"
+                  }`}
+                >
+                  WebSocket Debugger Disconnected
+                </h3>
+                <p
+                  className={`text-sm max-w-sm text-center leading-relaxed ${
+                    isDarkMode ? "text-gray-400" : "text-gray-500"
+                  }`}
+                >
+                  The debugger was cancelled. Reconnect to resume capturing
+                  WebSocket messages.
+                </p>
+                <button
+                  onClick={handleReconnectWs}
+                  disabled={isReconnecting}
+                  className={`flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold transition-all shadow-md ${
+                    isReconnecting
+                      ? isDarkMode
+                        ? "bg-blue-800 text-blue-300 cursor-wait shadow-blue-900/30"
+                        : "bg-blue-200 text-blue-600 cursor-wait shadow-blue-200/30"
+                      : isDarkMode
+                      ? "bg-blue-600 text-white hover:bg-blue-500 shadow-blue-600/30 hover:shadow-blue-500/40"
+                      : "bg-blue-600 text-white hover:bg-blue-700 shadow-blue-600/30 hover:shadow-blue-700/40"
+                  }`}
+                >
+                  {isReconnecting ? (
+                    <>
+                      <svg
+                        className="w-4 h-4 animate-spin"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                      >
+                        <circle
+                          className="opacity-25"
+                          cx="12"
+                          cy="12"
+                          r="10"
+                          stroke="currentColor"
+                          strokeWidth="4"
+                        />
+                        <path
+                          className="opacity-75"
+                          fill="currentColor"
+                          d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+                        />
+                      </svg>
+                      Reconnecting...
+                    </>
+                  ) : (
+                    <>
+                      <svg
+                        className="w-4 h-4"
+                        fill="none"
+                        stroke="currentColor"
+                        viewBox="0 0 24 24"
+                        strokeWidth={2}
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M8.288 15.038a5.25 5.25 0 017.424 0M5.106 11.856c3.807-3.808 9.98-3.808 13.788 0M1.924 8.674c5.565-5.565 14.587-5.565 20.152 0M12.53 18.22l-.53.53-.53-.53a.75.75 0 011.06 0z"
+                        />
+                      </svg>
+                      Reconnect WebSocket Debugger
+                    </>
+                  )}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

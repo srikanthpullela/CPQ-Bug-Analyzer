@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React from "react";
 import { RotateCcw, Moon, Sun, BarChart2, Search, Trash2, Zap, BellRing, Settings } from "lucide-react";
 import { SearchInput } from "./SearchInput";
 
@@ -23,8 +23,6 @@ interface HeaderSectionProps {
   openUrlPatternSettings: () => void;
 }
 
-declare const chrome: any;
-
 export const HeaderSection: React.FC<HeaderSectionProps> = ({
   isDarkMode,
   totalRequests,
@@ -45,84 +43,6 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
   setSearchTerm,
   openUrlPatternSettings,
 }) => {
-  const [debuggerConnected, setDebuggerConnected] = useState(true);
-  const [isReconnecting, setIsReconnecting] = useState(false);
-  const [debuggerError, setDebuggerError] = useState<string | null>(null);
-  const [interceptorMode, setInterceptorMode] = useState(false);
-  const reconnectTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  useEffect(() => {
-    // Listen for debugger disconnection messages
-    const handleMessage = (event: MessageEvent) => {
-      if (event.data?.source === "HAR_EXTRACTOR") {
-        console.log("🔌 HeaderSection received message:", event.data.type);
-        if (event.data.type === "DEBUGGER_DISCONNECTED") {
-          console.log("🔌 Setting debugger as disconnected");
-          setDebuggerConnected(false);
-          setInterceptorMode(false);
-          setDebuggerError(null);
-        } else if (event.data.type === "DEBUGGER_FALLBACK") {
-          console.log("🔌 Debugger fallback - WS interceptor active");
-          setDebuggerConnected(false);
-          setInterceptorMode(true);
-          setIsReconnecting(false);
-          setDebuggerError(null);
-        } else if (event.data.type === "DEBUGGER_RECONNECTED") {
-          console.log("🔌 Setting debugger as reconnected");
-          setDebuggerConnected(true);
-          setInterceptorMode(false);
-          setIsReconnecting(false);
-          setDebuggerError(null);
-          if (reconnectTimeoutRef.current) {
-            clearTimeout(reconnectTimeoutRef.current);
-            reconnectTimeoutRef.current = null;
-          }
-        } else if (event.data.type === "DEBUGGER_ERROR") {
-          console.log("🔌 Debugger error received:", event.data.error);
-          setDebuggerError(event.data.error);
-          setDebuggerConnected(false);
-          setIsReconnecting(false);
-        }
-      }
-    };
-
-    window.addEventListener("message", handleMessage);
-    return () => {
-      window.removeEventListener("message", handleMessage);
-      // Clean up any pending timeout
-      if (reconnectTimeoutRef.current) {
-        clearTimeout(reconnectTimeoutRef.current);
-      }
-    };
-  }, []);
-
-  const handleReconnect = () => {
-    console.log("🔌 HeaderSection: User clicked reconnect");
-    setIsReconnecting(true);
-    setDebuggerError(null); // Clear any previous errors
-    
-    // Clear any existing timeout
-    if (reconnectTimeoutRef.current) {
-      clearTimeout(reconnectTimeoutRef.current);
-    }
-    
-    // Send reconnection request to devtools
-    console.log("🔌 HeaderSection: Sending RECONNECT_DEBUGGER message");
-    window.postMessage({
-      source: "HAR_EXTRACTOR",
-      type: "RECONNECT_DEBUGGER"
-    }, "*");
-
-    // Extended timeout for aggressive reconnection (10 seconds instead of 3)
-    reconnectTimeoutRef.current = setTimeout(() => {
-      console.warn("🔌 Extended reconnection timeout - but connection may still succeed");
-      setIsReconnecting(false);
-      reconnectTimeoutRef.current = null;
-      
-      // Don't show as disconnected - the aggressive strategy might still work
-      // Just stop the loading indicator
-    }, 10000);
-  };
   return (
     <div
       className={`rounded shadow-sm border px-2 py-1 transition-colors duration-100 ${
@@ -176,42 +96,6 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
           </div>
         </div>
         <div className="flex items-center gap-2">
-          {!debuggerConnected && !interceptorMode && (
-            <div className="flex items-center gap-2">
-              {debuggerError && debuggerError.includes("different extension") && (
-                <div className={`px-3 py-1 rounded-md text-xs font-medium border ${
-                  isDarkMode 
-                    ? "bg-yellow-900 border-yellow-600 text-yellow-200" 
-                    : "bg-yellow-100 border-yellow-400 text-yellow-800"
-                }`}>
-                  ⚠️ Extension conflict - force reconnecting...
-                </div>
-              )}
-              <button
-                onClick={handleReconnect}
-                disabled={isReconnecting}
-                className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-sm font-medium transition-colors duration-100 border-2 ${
-                  isReconnecting
-                    ? isDarkMode
-                      ? "bg-blue-700 border-blue-500 text-blue-200 hover:bg-blue-600 disabled:bg-blue-800 disabled:border-blue-600 disabled:opacity-70"
-                      : "bg-blue-600 border-blue-400 text-blue-100 hover:bg-blue-500 disabled:bg-blue-300 disabled:border-blue-200"
-                    : isDarkMode
-                      ? "bg-red-600 border-red-400 text-red-100 hover:bg-red-500 hover:border-red-300"
-                      : "bg-red-500 border-red-400 text-white hover:bg-red-600 hover:border-red-300"
-                }`}
-                title={debuggerError ? `Error: ${debuggerError} - Click to force reconnection` : "Force reconnect debugger (ignores conflicts)"}
-              >
-                <RotateCcw className={`h-3 w-3 ${isReconnecting ? 'animate-spin text-blue-300' : 'text-red-200'}`} />
-                <span className={isReconnecting 
-                  ? isDarkMode ? "text-blue-200 font-semibold" : "text-blue-100 font-semibold"
-                  : isDarkMode ? "text-red-100 font-medium" : "text-white font-medium"
-                }>
-                  {isReconnecting ? "" : ""}
-                </span>
-              </button>
-            </div>
-          )}
-          
           <button
             onClick={openUrlPatternSettings}
             className={`p-1 rounded transition-colors duration-75 ${
