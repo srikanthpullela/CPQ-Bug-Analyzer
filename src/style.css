@@ -13,6 +13,13 @@ body {
   overflow-x: hidden; /* Prevent horizontal scroll */
 }
 
+/* Smooth dark/light mode transition */
+html, html *,
+html *::before,
+html *::after {
+  transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease, box-shadow 0.3s ease;
+}
+
 html, body {
   max-width: 100%;
   overflow-x: hidden; /* Ensure no horizontal overflow */
@@ -386,6 +393,155 @@ html.dark table th {
   color: rgb(229, 231, 235) !important; /* gray-200 */
 }
 
+/* Dark mode: table container and wrapper backgrounds */
+html.dark .rounded.overflow-x-auto.bg-white,
+html.dark div.bg-white.rounded-lg,
+html.dark .table-container-with-sticky .rounded,
+html.dark .table-container {
+  background-color: rgb(31, 41, 55) !important; /* gray-800 */
+}
+
+/* Dark mode: table section headers (HTTP Requests, WebSocket Messages) */
+html.dark h3.bg-gray-100,
+html.dark .bg-gray-100 {
+  background-color: rgb(17, 24, 39) !important; /* gray-900 */
+  color: rgb(229, 231, 235) !important; /* gray-200 */
+}
+
+/* Dark mode: table thead */
+html.dark thead.bg-gray-50,
+html.dark .bg-gray-50 thead {
+  background-color: rgb(31, 41, 55) !important; /* gray-800 */
+}
+
+/* Dark mode: alternating row backgrounds */
+html.dark table tbody tr.bg-white,
+html.dark table tbody tr:nth-child(even):not(.bg-blue-100):not(.bg-yellow-100):not(.bg-red-100) {
+  background-color: rgb(31, 41, 55) !important; /* gray-800 */
+}
+
+html.dark table tbody tr.bg-gray-50,
+html.dark table tbody tr:nth-child(odd):not(.bg-blue-100):not(.bg-yellow-100):not(.bg-red-100) {
+  background-color: rgb(24, 33, 47) !important; /* slightly darker */
+}
+
+/* Dark mode: status/direction badges */
+html.dark span.bg-green-50 {
+  background-color: rgb(6, 78, 59) !important; /* green-900 */
+  color: rgb(167, 243, 208) !important; /* green-200 */
+  border-color: rgb(16, 185, 129) !important; /* green-500 */
+}
+
+html.dark span.bg-blue-50 {
+  background-color: rgb(30, 58, 138) !important; /* blue-900 */
+  color: rgb(191, 219, 254) !important; /* blue-200 */
+  border-color: rgb(59, 130, 246) !important; /* blue-500 */
+}
+
+html.dark span.bg-yellow-50 {
+  background-color: rgb(120, 53, 15) !important; /* amber-900 */
+  color: rgb(253, 230, 138) !important; /* amber-200 */
+  border-color: rgb(245, 158, 11) !important; /* amber-500 */
+}
+
+html.dark span.bg-orange-50 {
+  background-color: rgb(124, 45, 18) !important; /* orange-900 */
+  color: rgb(254, 215, 170) !important; /* orange-200 */
+  border-color: rgb(249, 115, 22) !important; /* orange-500 */
+}
+
+html.dark span.bg-red-50 {
+  background-color: rgb(127, 29, 29) !important; /* red-900 */
+  color: rgb(254, 202, 202) !important; /* red-200 */
+  border-color: rgb(239, 68, 68) !important; /* red-500 */
+}
+
+html.dark span.bg-gray-50 {
+  background-color: rgb(55, 65, 81) !important; /* gray-700 */
+  color: rgb(209, 213, 219) !important; /* gray-300 */
+  border-color: rgb(107, 114, 128) !important; /* gray-500 */
+}
+
+/* Dark mode: error/warning rows */
+html.dark tr.bg-red-100 {
+  background-color: rgb(69, 10, 10) !important; /* dark red */
+  color: rgb(254, 202, 202) !important;
+}
+
+html.dark tr.bg-red-100 td {
+  color: rgb(254, 202, 202) !important;
+}
+
+/* Dark mode: WS connection info bar */
+html.dark .bg-green-50.border-b {
+  background-color: rgb(6, 78, 59) !important;
+  color: rgb(167, 243, 208) !important;
+}
+
+html.dark .bg-green-50.border-b .text-green-700,
+html.dark .bg-green-50.border-b .text-green-600 {
+  color: rgb(110, 231, 183) !important; /* green-300 */
+}
+
+/* Dark mode: empty state text */
+html.dark td.text-gray-500,
+html.dark .text-gray-500 {
+  color: rgb(156, 163, 175) !important; /* gray-400 */
+}
+
+/* Dark mode: table cell text overrides for gray-700 */
+html.dark td.text-gray-700,
+html.dark th.text-gray-700,
+html.dark .text-gray-800 {
+  color: rgb(229, 231, 235) !important; /* gray-200 */
+}
+
+/* Dark mode: FileUploader overrides */
+html.dark .border-slate-300.bg-slate-50 {
+  background-color: rgb(31, 41, 55) !important;
+  border-color: rgb(75, 85, 99) !important;
+}
+
+html.dark .border-slate-300.bg-slate-50:hover {
+  border-color: rgb(99, 102, 241) !important;
+  background-color: rgba(99, 102, 241, 0.1) !important;
+}
+
+html.dark .border-green-300.bg-green-50\/50 {
+  background-color: rgba(6, 78, 59, 0.3) !important;
+  border-color: rgb(16, 185, 129) !important;
+}
+
+html.dark .border-indigo-400.bg-indigo-50 {
+  background-color: rgba(99, 102, 241, 0.15) !important;
+  border-color: rgb(129, 140, 248) !important;
+}
+
+html.dark button.bg-white.border-slate-200 {
+  background-color: rgb(55, 65, 81) !important;
+  border-color: rgb(75, 85, 99) !important;
+  color: rgb(209, 213, 219) !important;
+}
+
+html.dark button.bg-white.border-slate-200:hover {
+  background-color: rgb(75, 85, 99) !important;
+  color: rgb(243, 244, 246) !important;
+}
+
+html.dark .text-slate-400,
+html.dark .text-slate-500 {
+  color: rgb(156, 163, 175) !important;
+}
+
+html.dark .text-slate-600 {
+  color: rgb(209, 213, 219) !important;
+}
+
+html.dark .text-green-700,
+html.dark .text-green-600 {
+  color: rgb(110, 231, 183) !important;
+}
+
 /* Selected row highlighting with background colors (no rings) - More specific selectors */
 /* Light mode selected rows */
 html:not(.dark) .table-container tr.bg-blue-100,
@@ -484,6 +640,58 @@ html.dark .modal-scrollable::-webkit-scrollbar-thumb:hover {
 /* Scroll indicator for modal content */
 .modal-content {
   position: relative;
+}
+
+/* Force-visible scrollbar for history/diff panels (overrides macOS overlay scrollbar) */
+.force-scrollbar {
+  overflow-y: scroll !important;
+  scrollbar-width: auto !important;
+  scrollbar-color: rgba(148, 163, 184, 0.7) rgba(0, 0, 0, 0.05);
+}
+
+html.dark .force-scrollbar {
+  scrollbar-color: rgba(180, 180, 195, 0.55) rgba(255, 255, 255, 0.08);
+}
+
+html .force-scrollbar::-webkit-scrollbar,
+html.dark .force-scrollbar::-webkit-scrollbar {
+  -webkit-appearance: none !important;
+  width: 10px !important;
+  height: 10px !important;
+  display: block !important;
+}
+
+html .force-scrollbar::-webkit-scrollbar-track,
+html.dark .force-scrollbar::-webkit-scrollbar-track {
+  background: rgba(0, 0, 0, 0.06) !important;
+  border-radius: 5px !important;
+  border: none !important;
+}
+
+html.dark .force-scrollbar::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+
+html .force-scrollbar::-webkit-scrollbar-thumb,
+html.dark .force-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(120, 130, 150, 0.7) !important;
+  border-radius: 5px !important;
+  border: none !important;
+  background-clip: padding-box !important;
+  min-height: 40px !important;
+}
+
+html .force-scrollbar::-webkit-scrollbar-thumb:hover,
+html.dark .force-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(100, 110, 130, 0.9) !important;
+}
+
+html.dark .force-scrollbar::-webkit-scrollbar-thumb {
+  background: rgba(180, 185, 200, 0.55) !important;
+}
+
+html.dark .force-scrollbar::-webkit-scrollbar-thumb:hover {
+  background: rgba(200, 205, 215, 0.75) !important;
 }
 
 .modal-content::before {

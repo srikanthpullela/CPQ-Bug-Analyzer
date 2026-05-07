@@ -15,7 +15,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { CSSTransition } from "react-transition-group";
 import "../style.css";
 import { UploadHistoryList } from "./components/UploadHistoryList";
-import { Activity, History, FileText, Zap, ArrowLeft, Home } from "lucide-react";
+import { Activity, History, FileText, Zap, ArrowLeft, Home, Sun, Moon } from "lucide-react";
 import HarQueryComponent from "./HarQueryComponent";
 import { v4 as uuidv4 } from "uuid";
 
@@ -66,6 +66,16 @@ const HarMethodsPage: React.FC = () => {
   // Add state for panel sizes
   const [leftPanelWidth, setLeftPanelWidth] = useState(60); // percentage
   const [isResizing, setIsResizing] = useState(false);
+
+  // Dark mode state - follows system preference by default
+  const [isDarkMode, setIsDarkMode] = useState(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("har-analyzer-dark-mode");
+      if (saved !== null) return JSON.parse(saved);
+      return window.matchMedia("(prefers-color-scheme: dark)").matches;
+    }
+    return false;
+  });
   
   const panelRef = useRef(null);
   const containerRef = useRef<HTMLDivElement>(null);
@@ -73,6 +83,20 @@ const HarMethodsPage: React.FC = () => {
   useEffect(() => {
     setIsPageLoaded(true);
   }, []);
+
+  // Dark mode effect
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      localStorage.setItem("har-analyzer-dark-mode", JSON.stringify(isDarkMode));
+      if (isDarkMode) {
+        document.documentElement.classList.add("dark");
+      } else {
+        document.documentElement.classList.remove("dark");
+      }
+    }
+  }, [isDarkMode]);
+
+  const toggleDarkMode = () => setIsDarkMode(!isDarkMode);
 
   interface HarJsonType {
     log: {
@@ -134,7 +158,7 @@ const HarMethodsPage: React.FC = () => {
       
       // Process ALL HTTP entries with minimal filtering - only exclude obvious static assets
       const allHttpRows = allEntries
-        .filter((ent) => {
+        .filter((ent: any) => {
           // Only filter out obvious static assets, keep everything else
           if (!ent.request?.url) return false;
           
@@ -149,7 +173,7 @@ const HarMethodsPage: React.FC = () => {
           const isStaticAsset = staticAssets.some((ext) => url.includes(ext));
           return !isStaticAsset;
         })
-        .map((ent) => {
+        .map((ent: any) => {
           // Process similar to existing logic but for ALL requests
           let method = "";
           let req: any = null;
@@ -164,7 +188,7 @@ const HarMethodsPage: React.FC = () => {
             }
           } else if (ent.request.queryString?.length > 0) {
             req = Object.fromEntries(
-              ent.request.queryString.map((q) => [q.name, q.value])
+              ent.request.queryString.map((q: any) => [q.name, q.value])
             );
           } else {
             req = {
@@ -233,7 +257,7 @@ const HarMethodsPage: React.FC = () => {
       const allWsEntries: any[] = [];
       let foundWsBaseUrl = wsBaseUrl; // Use existing wsBaseUrl as starting point
       
-      allEntries.forEach((ent, entryIndex) => {
+      allEntries.forEach((ent: any, entryIndex: number) => {
         // Check for WebSocket entries more comprehensively
         const hasWebSocketUrl = /^wss?:\/\//.test(ent.request?.url || '');
         const hasWebSocketMessages = (ent.messages && ent.messages.length > 0) || 
@@ -278,7 +302,7 @@ const HarMethodsPage: React.FC = () => {
             });
           }
           
-          frames.forEach((frame, frameIndex) => {
+          frames.forEach((frame: any, frameIndex: number) => {
             try {
               const obj = JSON.parse(frame.data);
               
@@ -318,7 +342,7 @@ const HarMethodsPage: React.FC = () => {
               allWsEntries.push({
                 endpoint,
                 action: 'Raw Message',
-                payload: { _rawData: frame.data, _parseError: error.message },
+                payload: { _rawData: frame.data, _parseError: (error as Error).message },
                 status: null,
                 time: formatTime(new Date(ent.startedDateTime || Date.now())),
                 timestamp: new Date(ent.startedDateTime || Date.now()).getTime(),
@@ -543,7 +567,7 @@ const HarMethodsPage: React.FC = () => {
   }, [showAllNetworkCalls, harText]);
 
   return (
-    <div ref={containerRef} className="flex h-screen bg-slate-50">
+    <div ref={containerRef} className={`flex h-screen ${isDarkMode ? "bg-gray-900" : "bg-slate-50"}`}>
       <AnimatePresence>
         <motion.div
           className="flex flex-col overflow-hidden"
@@ -556,56 +580,65 @@ const HarMethodsPage: React.FC = () => {
           {/* Fixed top section */}
           <div className="flex-shrink-0">
           {/* Updated Navigation to match pattern */}
-          <nav className="bg-white border-b border-slate-200 px-4 py-2">
+          <nav className={`border-b px-4 py-2 ${isDarkMode ? "bg-gray-800 border-gray-700" : "bg-white border-slate-200"}`}>
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-4 text-sm">
                 <Link
                   to="/"
-                  className="text-slate-600 hover:text-indigo-600 transition-colors flex items-center gap-1"
+                  className={`transition-colors flex items-center gap-1 ${isDarkMode ? "text-gray-300 hover:text-indigo-400" : "text-slate-600 hover:text-indigo-600"}`}
                 >
                   <ArrowLeft className="w-4 h-4" />
                   <Home className="w-4 h-4" />
                   <span>Back to Home</span>
                 </Link>
-                <span className="text-slate-300">|</span>
+                <span className={isDarkMode ? "text-gray-600" : "text-slate-300"}>|</span>
                 <Link
                   to="/formatter"
-                  className="text-slate-600 hover:text-indigo-600 transition-colors flex items-center gap-1"
+                  className={`transition-colors flex items-center gap-1 ${isDarkMode ? "text-gray-300 hover:text-indigo-400" : "text-slate-600 hover:text-indigo-600"}`}
                 >
                   <Activity className="w-3 h-3" />
                   Formatter
                 </Link>
-                <span className="text-slate-300">|</span>
+                <span className={isDarkMode ? "text-gray-600" : "text-slate-300"}>|</span>
                 <Link
                   to="/compare"
-                  className="text-slate-600 hover:text-indigo-600 transition-colors"
+                  className={`transition-colors ${isDarkMode ? "text-gray-300 hover:text-indigo-400" : "text-slate-600 hover:text-indigo-600"}`}
                 >
                   Compare
                 </Link>
-                <span className="text-slate-300">|</span>
+                <span className={isDarkMode ? "text-gray-600" : "text-slate-300"}>|</span>
                 <Link
                   to="/pieces"
-                  className="text-slate-600 hover:text-indigo-600 transition-colors"
+                  className={`transition-colors ${isDarkMode ? "text-gray-300 hover:text-indigo-400" : "text-slate-600 hover:text-indigo-600"}`}
                 >
                   Pieces
                 </Link>
-                <span className="text-slate-300">|</span>
+                <span className={isDarkMode ? "text-gray-600" : "text-slate-300"}>|</span>
                 <Link
                   to="/log"
-                  className="text-slate-600 hover:text-indigo-600 transition-colors"
+                  className={`transition-colors ${isDarkMode ? "text-gray-300 hover:text-indigo-400" : "text-slate-600 hover:text-indigo-600"}`}
                 >
                   Log
                 </Link>
               </div>
-              <div className="flex items-center gap-1 text-xs text-slate-500 bg-slate-100 px-2 py-1 rounded">
-                <Zap className="w-3 h-3" />
-                HAR Analyzer
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={toggleDarkMode}
+                  className={`p-1.5 rounded-lg transition-colors ${isDarkMode ? "text-yellow-400 hover:bg-gray-700" : "text-gray-500 hover:bg-slate-100"}`}
+                  title={isDarkMode ? "Switch to light mode" : "Switch to dark mode"}
+                >
+                  {isDarkMode ? <Sun className="w-4 h-4" /> : <Moon className="w-4 h-4" />}
+                </button>
+                <div className={`flex items-center gap-1 text-xs px-2 py-1 rounded ${isDarkMode ? "text-gray-400 bg-gray-700" : "text-slate-500 bg-slate-100"}`}>
+                  <Zap className="w-3 h-3" />
+                  HAR Analyzer
+                </div>
               </div>
             </div>
           </nav>
 
           {/* Upload, Recent, Search — compact row */}
-          <div className="px-3 py-2 bg-white border-b border-slate-200 space-y-2">
+          <div className={`px-3 py-2 border-b space-y-2 ${isDarkMode ? "bg-gray-800 border-gray-700" : "bg-white border-slate-200"}`}>
             {/* File upload */}
             <FileUploader
               onParse={handleParse}
@@ -618,13 +651,14 @@ const HarMethodsPage: React.FC = () => {
               <UploadHistoryList
                 uploads={recentUploads}
                 onLoad={handleHistoryLoad}
+                isDarkMode={isDarkMode}
               />
             )}
 
             {/* Search + controls */}
             <div className="flex items-center gap-2">
               <div className="flex-1">
-                <SearchInput value={searchTerm} onChange={setSearchTerm} />
+                <SearchInput value={searchTerm} onChange={setSearchTerm} isDarkMode={isDarkMode} />
               </div>
               <motion.button
                 className="px-2.5 py-1.5 bg-gradient-to-r from-indigo-500 to-purple-600 text-white text-xs font-medium rounded-lg hover:shadow-sm transition-all duration-200 flex items-center gap-1"
@@ -658,18 +692,18 @@ const HarMethodsPage: React.FC = () => {
                     }}
                     className="w-3.5 h-3.5 text-indigo-600 border-gray-300 focus:ring-indigo-500 rounded"
                   />
-                  <span className="ml-1.5 text-xs text-slate-600 group-hover:text-slate-800">
+                  <span className={`ml-1.5 text-xs group-hover:text-slate-800 ${isDarkMode ? "text-gray-300" : "text-slate-600"}`}>
                     Show All Network Calls
                   </span>
                 </label>
-                <span className="text-[11px] text-slate-400">
+                <span className={`text-[11px] ${isDarkMode ? "text-gray-500" : "text-slate-400"}`}>
                   {currentHttpRows.length + currentWsRows.length} calls
                 </span>
               </div>
               {showAllNetworkCalls && (
                 <button
                   onClick={loadAllNetworkCalls}
-                  className="px-2 py-0.5 text-[11px] bg-slate-100 hover:bg-slate-200 text-slate-600 rounded transition-colors"
+                  className={`px-2 py-0.5 text-[11px] rounded transition-colors ${isDarkMode ? "bg-gray-700 hover:bg-gray-600 text-gray-300" : "bg-slate-100 hover:bg-slate-200 text-slate-600"}`}
                 >
                   Refresh
                 </button>
@@ -688,26 +722,27 @@ const HarMethodsPage: React.FC = () => {
                 onClick={() => setQueryModalOpen(false)}
               >
                 <div
-                  className="bg-white rounded-xl shadow-2xl w-full max-w-4xl h-[90vh] flex flex-col overflow-hidden animate-in slide-in-from-bottom-4 duration-300"
+                  className={`rounded-xl shadow-2xl w-full max-w-4xl h-[90vh] flex flex-col overflow-hidden animate-in slide-in-from-bottom-4 duration-300 ${isDarkMode ? "bg-gray-800" : "bg-white"}`}
                   onClick={(e) => e.stopPropagation()}
                 >
                   <HarQueryComponent
                     httpRows={currentHttpRows}
                     wsRows={currentWsRows}
                     onClose={() => setQueryModalOpen(false)}
+                    isDarkMode={isDarkMode}
                   />
                 </div>
               </div>
             )}
 
             {/* HTTP Table Section */}
-            <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+            <div className={`rounded-lg border overflow-hidden ${isDarkMode ? "bg-gray-800 border-gray-700" : "bg-white border-slate-200"}`}>
               <div className="table-container-with-sticky">
                 <HttpTable
                   rows={currentHttpRows}
                   filter={searchTerm}
                   onView={openPanel}
-                  selectedRowId={selectedRowId}
+                  selectedRowId={selectedRowId || undefined}
                   showAllCalls={showAllNetworkCalls}
                   panelOpen={panelOpen}
                 />
@@ -716,14 +751,14 @@ const HarMethodsPage: React.FC = () => {
 
             {/* WebSocket Table Section - Only show if there are WS rows */}
             {currentWsRows.length > 0 && (
-              <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
+              <div className={`rounded-lg border overflow-hidden ${isDarkMode ? "bg-gray-800 border-gray-700" : "bg-white border-slate-200"}`}>
                 <div className="table-container-with-sticky">
                   <WsTable
                     rows={currentWsRows}
                     baseUrl={wsBaseUrl}
                     filter={searchTerm}
                     onView={openPanel}
-                    selectedRowId={selectedRowId}
+                    selectedRowId={selectedRowId || undefined}
                     panelOpen={panelOpen}
                   />
                 </div>
@@ -736,13 +771,15 @@ const HarMethodsPage: React.FC = () => {
       {/* Resizable Divider */}
       {panelOpen && (
         <div
-          className={`w-1 bg-slate-300 hover:bg-slate-400 cursor-col-resize transition-colors duration-200 relative group ${
-            isResizing ? "bg-slate-400" : ""
+          className={`w-1 cursor-col-resize transition-colors duration-200 relative group ${
+            isDarkMode
+              ? `bg-gray-600 hover:bg-gray-500 ${isResizing ? "bg-gray-500" : ""}`
+              : `bg-slate-300 hover:bg-slate-400 ${isResizing ? "bg-slate-400" : ""}`
           }`}
           onMouseDown={handleMouseDown}
         >
           <div className="absolute inset-y-0 -left-1 -right-1 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-            <div className="w-1 h-8 bg-slate-500 rounded-full"></div>
+            <div className={`w-1 h-8 rounded-full ${isDarkMode ? "bg-gray-400" : "bg-slate-500"}`}></div>
           </div>
         </div>
       )}
@@ -752,7 +789,7 @@ const HarMethodsPage: React.FC = () => {
         {panelOpen && (
           <motion.div
             ref={panelRef}
-            className="h-full border-l border-slate-200 shadow-lg"
+            className={`h-full border-l shadow-lg ${isDarkMode ? "border-gray-700" : "border-slate-200"}`}
             style={{ width: `${100 - leftPanelWidth}%` }}
             initial={{ x: "100%" }}
             animate={{ x: 0 }}
@@ -763,6 +800,7 @@ const HarMethodsPage: React.FC = () => {
               open={panelOpen}
               title={panelTitle}
               data={panelData}
+              isDarkMode={isDarkMode}
               onCopy={() =>
                 navigator.clipboard.writeText(
                   JSON.stringify(panelData, null, 2)
@@ -785,6 +823,7 @@ const HarMethodsPage: React.FC = () => {
             onClose={() => setHistoryModalOpen(false)}
             onChangeField={setFieldName}
             allFields={extractedKeys}
+            isDarkMode={isDarkMode}
           />
         )}
       </AnimatePresence>

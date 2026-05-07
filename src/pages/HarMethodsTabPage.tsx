@@ -46,7 +46,8 @@ const HarMethodsTabPage: React.FC = () => {
   const [isDarkMode, setIsDarkMode] = useState(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem("har-analyzer-dark-mode");
-      return saved ? JSON.parse(saved) : false;
+      if (saved !== null) return JSON.parse(saved);
+      return window.matchMedia("(prefers-color-scheme: dark)").matches;
     }
     return false;
   });

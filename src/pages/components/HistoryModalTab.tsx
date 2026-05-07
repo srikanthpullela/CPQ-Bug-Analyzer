@@ -117,15 +117,16 @@ export const HistoryModalTab: React.FC<Props> = ({
         }`}
       >
         <div
-          className={`history-modal rounded-lg shadow-lg w-11/12 sm:w-3/4 lg:w-2/3 h-[85vh] flex flex-col min-h-0 z-50 transform transition-all duration-300 ease-out border ${
+          className={`history-modal rounded-lg shadow-lg w-11/12 sm:w-3/4 lg:w-2/3 flex flex-col z-50 transform transition-all duration-300 ease-out border ${
             isDarkMode
               ? "bg-gray-800 border-gray-600"
               : "bg-white border-gray-300"
           }`}
+          style={{ height: '85vh' }}
         >
           {/* Header */}
           <div
-            className={`flex justify-between items-center p-4 border-b transition-colors ${
+            className={`flex-shrink-0 flex justify-between items-center p-4 border-b transition-colors ${
               isDarkMode ? "border-gray-700" : "border-gray-200"
             }`}
           >
@@ -150,7 +151,7 @@ export const HistoryModalTab: React.FC<Props> = ({
 
           {/* Search */}
           <div
-            className={`p-4 space-y-2 border-b transition-colors ${
+            className={`flex-shrink-0 p-4 space-y-2 border-b transition-colors ${
               isDarkMode ? "border-gray-700" : "border-gray-200"
             }`}
           >
@@ -286,7 +287,7 @@ export const HistoryModalTab: React.FC<Props> = ({
           </div>
 
           {/* Scrollable List */}
-          <div className="min-h-0 overflow-y-auto p-4 history-list">
+          <div className="overflow-y-auto force-scrollbar p-4 history-list" style={{ height: '85%' }}>
             {isSearching ? (
               <div className="flex flex-col items-center justify-center py-8">
                 <div className={`w-8 h-8 border-4 rounded-full animate-spin mb-4 ${
@@ -347,17 +348,17 @@ export const HistoryModalTab: React.FC<Props> = ({
                         return (
                           <li
                             key={`${it.id}-${it.objName}`}
-                            className={
+                            className={`flex items-center gap-2 py-1.5 px-2 rounded text-sm ${
                               changed
                                 ? isDarkMode
-                                  ? "bg-green-900 p-1 rounded"
-                                  : "bg-green-100 p-1 rounded"
+                                  ? "bg-green-900/30 border-l-3 border-l-green-400"
+                                  : "bg-green-50 border-l-3 border-l-green-500"
                                 : ""
-                            }
+                            }`}
                           >
                             {it.objData && (
                               <button
-                                className={`font-mono underline mr-1 transition-colors ${
+                                className={`font-mono underline mr-1 flex-shrink-0 transition-colors ${
                                   isDarkMode
                                     ? "text-blue-400 hover:text-blue-300"
                                     : "text-blue-600 hover:text-blue-800"
@@ -368,7 +369,7 @@ export const HistoryModalTab: React.FC<Props> = ({
                               </button>
                             )}
                             <span
-                              className={`transition-colors ${
+                              className={`flex-shrink-0 transition-colors ${
                                 isDarkMode ? "text-gray-300" : "text-gray-700"
                               }`}
                             >
@@ -376,7 +377,7 @@ export const HistoryModalTab: React.FC<Props> = ({
                             </span>
                             {!isChromeExtension && origin ? (
                               <a
-                                className={`underline transition-colors ${
+                                className={`underline flex-shrink-0 transition-colors ${
                                   isDarkMode
                                     ? "text-blue-400 hover:text-blue-300"
                                     : "text-blue-600 hover:text-blue-800"
@@ -389,7 +390,7 @@ export const HistoryModalTab: React.FC<Props> = ({
                               </a>
                             ) : (
                               <span
-                                className={`transition-colors ${
+                                className={`flex-shrink-0 transition-colors ${
                                   isDarkMode ? "text-gray-300" : "text-gray-700"
                                 }`}
                               >
@@ -398,7 +399,7 @@ export const HistoryModalTab: React.FC<Props> = ({
                             )}
                             {(it as any).productName && (
                               <span
-                                className={`ml-2 px-2 py-0.5 rounded text-xs font-medium ${
+                                className={`ml-1 px-2 py-0.5 rounded text-xs font-medium flex-shrink-0 ${
                                   isDarkMode
                                     ? "bg-indigo-900 text-indigo-200"
                                     : "bg-indigo-100 text-indigo-700"
@@ -410,18 +411,13 @@ export const HistoryModalTab: React.FC<Props> = ({
                                   : (it as any).productName}
                               </span>
                             )}
-                            <span
-                              className={`transition-colors ${
-                                isDarkMode ? "text-gray-400" : "text-gray-600"
-                              }`}
-                            >
-                              , 'oldValue'
-                            </span>
+                            <span className={`flex-shrink-0 ${isDarkMode ? "text-gray-500" : "text-gray-400"}`}>&rarr;</span>
+                            <span className={`flex-shrink-0 ${isDarkMode ? "text-gray-400" : "text-gray-500"}`}>old:</span>
                             <button
-                              className={`underline ml-1 mr-1 transition-colors ${
-                                isDarkMode
-                                  ? "text-blue-400 hover:text-blue-300"
-                                  : "text-blue-600 hover:text-blue-800"
+                              className={`font-mono font-semibold flex-shrink-0 hover:underline transition-colors ${
+                                changed
+                                  ? isDarkMode ? "text-red-400" : "text-red-600"
+                                  : isDarkMode ? "text-gray-300" : "text-gray-600"
                               } ${
                                 it.oldVal === undefined ||
                                 it.prevObjData == null
@@ -441,18 +437,12 @@ export const HistoryModalTab: React.FC<Props> = ({
                             >
                               <code>{filterText ? highlightText(String(it.oldVal ?? "—"), filterText) : String(it.oldVal ?? "—")}</code>
                             </button>
-                            <span
-                              className={`transition-colors ${
-                                isDarkMode ? "text-gray-400" : "text-gray-600"
-                              }`}
-                            >
-                              , 'newValue'
-                            </span>
+                            <span className={`flex-shrink-0 ${isDarkMode ? "text-gray-400" : "text-gray-500"}`}>new:</span>
                             <button
-                              className={`underline ml-1 transition-colors ${
-                                isDarkMode
-                                  ? "text-blue-400 hover:text-blue-300"
-                                  : "text-blue-600 hover:text-blue-800"
+                              className={`font-mono font-semibold flex-shrink-0 hover:underline transition-colors ${
+                                changed
+                                  ? isDarkMode ? "text-green-400" : "text-green-600"
+                                  : isDarkMode ? "text-gray-300" : "text-gray-600"
                               }`}
                               onClick={() =>
                                 preview(it.objData, `${it.objName} (after)`)
@@ -461,10 +451,10 @@ export const HistoryModalTab: React.FC<Props> = ({
                               <code>{filterText ? highlightText(String(it.newVal), filterText) : String(it.newVal)}</code>
                             </button>
                             <button
-                              className={`ml-2 px-2 py-1 rounded text-sm transition-colors ${
+                              className={`ml-auto px-2 py-1 rounded text-xs flex items-center gap-1 flex-shrink-0 transition-colors ${
                                 isDarkMode
                                   ? "bg-blue-900 hover:bg-blue-800 text-blue-200"
-                                  : "bg-blue-100 hover:bg-blue-200 text-blue-800"
+                                  : "bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200"
                               } ${
                                 !it.prevObjData || !it.objData
                                   ? "opacity-50 pointer-events-none cursor-not-allowed"
@@ -478,7 +468,7 @@ export const HistoryModalTab: React.FC<Props> = ({
                                 )
                               }
                             >
-                              Compare Diff
+                              Diff
                             </button>
                           </li>
                         );
@@ -509,11 +499,12 @@ export const HistoryModalTab: React.FC<Props> = ({
           onClick={() => setPreviewData(null)}
         >
           <div
-            className={`preview-data rounded-lg shadow-lg w-3/4 max-h-[50vh] overflow-auto p-6 transition-colors border ${
+            className={`preview-data rounded-lg shadow-lg w-3/4 overflow-auto force-scrollbar p-6 transition-colors border ${
               isDarkMode
                 ? "bg-gray-800 border-gray-600"
                 : "bg-white border-gray-300"
             }`}
+            style={{ maxHeight: '50vh' }}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex justify-between items-center mb-4">
@@ -563,11 +554,12 @@ export const HistoryModalTab: React.FC<Props> = ({
           onClick={() => setDiffData(null)}
         >
           <div
-            className={`history-diff rounded-lg shadow-lg w-4/5 max-h-[60vh] overflow-auto p-6 font-mono text-sm z-60 transition-colors border ${
+            className={`history-diff rounded-lg shadow-lg w-4/5 overflow-auto force-scrollbar p-6 font-mono text-sm z-60 transition-colors border ${
               isDarkMode
                 ? "bg-gray-800 border-gray-600"
                 : "bg-white border-gray-300"
             }`}
+            style={{ maxHeight: '60vh' }}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex justify-between items-center mb-4">
