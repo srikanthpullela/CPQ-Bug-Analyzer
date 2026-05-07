@@ -294,10 +294,14 @@ export const HttpTableTab: React.FC<Props> = ({
     return isDarkMode ? 'bg-gray-700 text-gray-300 border-gray-600' : 'bg-gray-100 text-gray-600 border-gray-200';
   };
 
-  // Add function to get inline styles for problematic colors
+  // Add function to get inline styles for problematic colors and selection
   const getRowInlineStyle = (gr: any, isSelected: boolean): React.CSSProperties => {
-    // Don't apply error coloring when the row is selected
-    if (isSelected) return {};
+    if (isSelected) {
+      return {
+        backgroundColor: isDarkMode ? '#1e3a5f' : '#dbeafe',
+        borderLeft: '4px solid #3b82f6',
+      };
+    }
     if (gr.status !== null && typeof gr.status === 'number') {
       if (gr.status >= 400 && gr.status < 500) {
         return {
@@ -433,13 +437,9 @@ export const HttpTableTab: React.FC<Props> = ({
             <tr
               key={gr.id || i}
               data-row-key={`http-${i}`}
-              className={`transition-colors duration-200 cursor-pointer ${
-                isDarkMode ? "hover:bg-gray-700" : "hover:bg-blue-50"
-              } ${
+              className={`transition-colors duration-200 cursor-pointer har-table-row ${
                 isSelected
-                  ? isDarkMode 
-                    ? "!bg-blue-800 border-l-4 border-blue-400" 
-                    : "!bg-blue-100 border-l-4 border-blue-500"
+                  ? ""
                   : getRowColorClass(gr) ||
                     (i % 2 === 0 
                       ? isDarkMode 

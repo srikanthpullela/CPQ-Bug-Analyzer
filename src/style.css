@@ -29,6 +29,14 @@ html, body {
   box-sizing: border-box;
 }
 
+/* Table row hover and selection - using CSS to guarantee it works */
+.har-table-row:hover {
+  background-color: #eff6ff !important; /* blue-50 */
+}
+html.dark .har-table-row:hover {
+  background-color: #374151 !important; /* gray-700 */
+}
+
 /* Compact react-json-view tree to match Chrome DevTools density */
 .react-json-view {
   line-height: 1.3 !important;
