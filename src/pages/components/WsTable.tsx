@@ -104,14 +104,12 @@ export const WsTable: React.FC<Props> = ({
                 <tr
                   key={w.id || i}
                   className={`transition-colors duration-200 cursor-pointer har-table-row ${
+                    isSelected ? "har-row-selected" : ""
+                  } ${
                     isSelected
                       ? ""
                       : rowColor || (i % 2 === 0 ? "bg-white" : "bg-gray-50")
                   }`}
-                  style={isSelected ? {
-                    backgroundColor: '#dbeafe',
-                    borderLeft: '4px solid #3b82f6',
-                  } : {}}
                   onClick={() => {
                     onView(
                       w.action || w.endpoint || "WebSocket",

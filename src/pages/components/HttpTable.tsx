@@ -177,12 +177,11 @@ export const HttpTable: React.FC<Props> = ({
               <tr
                 key={gr.id || i}
                 className={`transition-colors duration-200 cursor-pointer har-table-row ${
+                  isSelected ? "har-row-selected" : ""
+                } ${
                   isSelected ? "" : getRowColorClass(gr) || (i % 2 === 0 ? "bg-white" : "bg-gray-50")
                 }`}
-                style={isSelected ? {
-                  backgroundColor: '#dbeafe',
-                  borderLeft: '4px solid #3b82f6',
-                } : getRowInlineStyle(gr)}
+                style={isSelected ? {} : getRowInlineStyle(gr)}
                 onClick={() => {
                   onView(
                     gr.method,

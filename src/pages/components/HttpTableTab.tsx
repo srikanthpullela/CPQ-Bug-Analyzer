@@ -438,6 +438,8 @@ export const HttpTableTab: React.FC<Props> = ({
               key={gr.id || i}
               data-row-key={`http-${i}`}
               className={`transition-colors duration-200 cursor-pointer har-table-row ${
+                isSelected ? "har-row-selected" : ""
+              } ${
                 isSelected
                   ? ""
                   : getRowColorClass(gr) ||
@@ -449,7 +451,7 @@ export const HttpTableTab: React.FC<Props> = ({
                         ? "bg-gray-900" 
                         : "bg-gray-50")
               }`}
-              style={getRowInlineStyle(gr, isSelected)}
+              style={isSelected ? {} : getRowInlineStyle(gr, isSelected)}
               onClick={() => {
                 const isHttpLike = gr.patternType === 'http' || gr.patternType === 'generic';
                 onView(

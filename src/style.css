@@ -31,10 +31,21 @@ html, body {
 
 /* Table row hover and selection - using CSS to guarantee it works */
 .har-table-row:hover {
-  background-color: #eff6ff !important; /* blue-50 */
+  background-color: #f0f9ff !important; /* sky-50 - very light */
 }
 html.dark .har-table-row:hover {
-  background-color: #374151 !important; /* gray-700 */
+  background-color: #1f2937 !important; /* gray-800 lighter */
+}
+/* Don't override selection highlight on hover */
+.har-table-row.har-row-selected,
+.har-table-row.har-row-selected:hover {
+  background-color: #60a5fa !important; /* blue-400 - bright */
+  border-left: 4px solid #2563eb !important; /* blue-600 */
+}
+html.dark .har-table-row.har-row-selected,
+html.dark .har-table-row.har-row-selected:hover {
+  background-color: #2563eb !important; /* blue-600 - bright in dark */
+  border-left: 4px solid #60a5fa !important; /* blue-400 */
 }
 
 /* Compact react-json-view tree to match Chrome DevTools density */
