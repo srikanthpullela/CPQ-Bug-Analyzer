@@ -171,15 +171,17 @@ export const HttpTable: React.FC<Props> = ({
             </tr>
           </thead>
           <tbody>
-            {displayRows.map((gr, i) => (
+            {displayRows.map((gr, i) => {
+              const isSelected = selectedRowId === gr.id;
+              return (
               <tr
                 key={gr.id || i}
                 className={`transition-colors duration-200 cursor-pointer hover:bg-blue-50 ${
-                  selectedRowId === gr.id ? "bg-blue-100 border-blue-300" : ""
+                  isSelected ? "!bg-blue-100 border-l-4 border-blue-500" : ""
                 } ${
-                  selectedRowId === gr.id ? "" : getRowColorClass(gr) || (i % 2 === 0 ? "bg-white" : "bg-gray-50")
+                  isSelected ? "" : getRowColorClass(gr) || (i % 2 === 0 ? "bg-white" : "bg-gray-50")
                 }`}
-                style={getRowInlineStyle(gr)}
+                style={isSelected ? {} : getRowInlineStyle(gr)}
                 onClick={() => {
                   onView(
                     gr.method,
@@ -222,7 +224,8 @@ export const HttpTable: React.FC<Props> = ({
                   </>
                 )}
               </tr>
-            ))}
+              );
+            })}
             {displayRows.length === 0 && (
               <tr>
                 <td colSpan={panelOpen ? 3 : 5} className="text-center py-4 text-gray-500 text-xs">

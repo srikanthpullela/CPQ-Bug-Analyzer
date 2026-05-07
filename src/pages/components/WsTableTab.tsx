@@ -258,22 +258,19 @@ export const WsTableTab: React.FC<Props> = ({
             }
 
             const rowColor = getWsRowColorClass(w);
+            const isSelected = selectedRowKey === `ws-${i}`;
 
             return (
               <tr
                 key={w.id || i}
                 data-row-key={`ws-${i}`}
-                className={`transition-colors duration-200 cursor-pointer hover:${
-                  isDarkMode ? "bg-gray-700" : "bg-blue-50"
+                className={`transition-colors duration-200 cursor-pointer ${
+                  isDarkMode ? "hover:bg-gray-700" : "hover:bg-blue-50"
                 } ${
-                  selectedRowKey === `ws-${i}`
+                  isSelected
                     ? isDarkMode
-                      ? "bg-blue-800 border-blue-600"
-                      : "bg-blue-100 border-blue-300"
-                    : ""
-                } ${
-                  selectedRowKey === `ws-${i}`
-                    ? ""
+                      ? "!bg-blue-800 border-l-4 border-blue-400"
+                      : "!bg-blue-100 border-l-4 border-blue-500"
                     : rowColor ||
                       (i % 2 === 0
                         ? isDarkMode

@@ -295,7 +295,9 @@ export const HttpTableTab: React.FC<Props> = ({
   };
 
   // Add function to get inline styles for problematic colors
-  const getRowInlineStyle = (gr: any): React.CSSProperties => {
+  const getRowInlineStyle = (gr: any, isSelected: boolean): React.CSSProperties => {
+    // Don't apply error coloring when the row is selected
+    if (isSelected) return {};
     if (gr.status !== null && typeof gr.status === 'number') {
       if (gr.status >= 400 && gr.status < 500) {
         return {
@@ -425,21 +427,19 @@ export const HttpTableTab: React.FC<Props> = ({
           </tr>
         </thead>
         <tbody>
-          {displayRows.map((gr, i) => (
+          {displayRows.map((gr, i) => {
+            const isSelected = selectedRowKey === `http-${i}`;
+            return (
             <tr
               key={gr.id || i}
               data-row-key={`http-${i}`}
-              className={`transition-colors duration-200 cursor-pointer hover:${
-                isDarkMode ? "bg-gray-700" : "bg-blue-50"
+              className={`transition-colors duration-200 cursor-pointer ${
+                isDarkMode ? "hover:bg-gray-700" : "hover:bg-blue-50"
               } ${
-                selectedRowKey === `http-${i}` 
+                isSelected
                   ? isDarkMode 
-                    ? "bg-blue-800 border-blue-600" 
-                    : "bg-blue-100 border-blue-300"
-                  : ""
-              } ${
-                selectedRowKey === `http-${i}` 
-                  ? "" 
+                    ? "!bg-blue-800 border-l-4 border-blue-400" 
+                    : "!bg-blue-100 border-l-4 border-blue-500"
                   : getRowColorClass(gr) ||
                     (i % 2 === 0 
                       ? isDarkMode 
@@ -449,7 +449,7 @@ export const HttpTableTab: React.FC<Props> = ({
                         ? "bg-gray-900" 
                         : "bg-gray-50")
               }`}
-              style={getRowInlineStyle(gr)}
+              style={getRowInlineStyle(gr, isSelected)}
               onClick={() => {
                 const isHttpLike = gr.patternType === 'http' || gr.patternType === 'generic';
                 onView(
@@ -555,7 +555,8 @@ export const HttpTableTab: React.FC<Props> = ({
               )}
 
             </tr>
-            ))}
+            );
+            })}
         </tbody>
       </table>
       )}

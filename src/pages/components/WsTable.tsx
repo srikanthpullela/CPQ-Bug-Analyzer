@@ -98,14 +98,15 @@ export const WsTable: React.FC<Props> = ({
                 try { w.payload.PayLoad = JSON.parse(w.payload.PayLoad); } catch {}
               }
               const rowColor = getWsRowColorClass(w);
+              const isSelected = selectedRowId === (w.id || `ws-${i}`);
 
               return (
                 <tr
                   key={w.id || i}
                   className={`transition-colors duration-200 cursor-pointer hover:bg-blue-50 ${
-                    selectedRowId === (w.id || `ws-${i}`) ? "bg-blue-100 border-blue-300" : ""
+                    isSelected ? "!bg-blue-100 border-l-4 border-blue-500" : ""
                   } ${
-                    selectedRowId === (w.id || `ws-${i}`)
+                    isSelected
                       ? ""
                       : rowColor || (i % 2 === 0 ? "bg-white" : "bg-gray-50")
                   }`}
