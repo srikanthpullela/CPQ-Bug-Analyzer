@@ -434,13 +434,13 @@ html.dark .bg-gray-50 thead {
 }
 
 /* Dark mode: alternating row backgrounds */
-html.dark table tbody tr.bg-white:not(.har-row-selected),
-html.dark table tbody tr:nth-child(even):not(.bg-blue-100):not(.bg-yellow-100):not(.bg-red-100):not(.har-row-selected) {
+html.dark table tbody tr.bg-white:not(.har-row-selected):not(:hover),
+html.dark table tbody tr:nth-child(even):not(.bg-blue-100):not(.bg-yellow-100):not(.bg-red-100):not(.har-row-selected):not(:hover) {
   background-color: rgb(31, 41, 55) !important; /* gray-800 */
 }
 
-html.dark table tbody tr.bg-gray-50:not(.har-row-selected),
-html.dark table tbody tr:nth-child(odd):not(.bg-blue-100):not(.bg-yellow-100):not(.bg-red-100):not(.har-row-selected) {
+html.dark table tbody tr.bg-gray-50:not(.har-row-selected):not(:hover),
+html.dark table tbody tr:nth-child(odd):not(.bg-blue-100):not(.bg-yellow-100):not(.bg-red-100):not(.har-row-selected):not(:hover) {
   background-color: rgb(24, 33, 47) !important; /* slightly darker */
 }
 
