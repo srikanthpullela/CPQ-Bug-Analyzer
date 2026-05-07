@@ -37,6 +37,11 @@ const HarMethodsTabPage: React.FC = () => {
   const [selectedRowKey, setSelectedRowKey] = useState<string | null>(null);
   const [urlPatternSettingsOpen, setUrlPatternSettingsOpen] = useState(false);
   const [showClearConfirmation, setShowClearConfirmation] = useState(false);
+  const [showAllCalls, setShowAllCalls] = useState(() => {
+    try {
+      return localStorage.getItem('har_show_all_calls') === 'true';
+    } catch { return false; }
+  });
 
   // Auto-scroll state
   const [autoScroll, setAutoScroll] = useState(false);
@@ -136,6 +141,14 @@ const HarMethodsTabPage: React.FC = () => {
       { source: "HAR_EXTRACTOR", type: "REQUEST_HAR_RELOAD" },
       "*"
     );
+  };
+
+  const toggleShowAllCalls = () => {
+    const newValue = !showAllCalls;
+    setShowAllCalls(newValue);
+    localStorage.setItem('har_show_all_calls', String(newValue));
+    // Reload network data with the new filter setting
+    requestHarReload();
   };
 
   const requestClearLogs = () => {
@@ -362,6 +375,8 @@ const HarMethodsTabPage: React.FC = () => {
                   setShowMatchesModal={rulesHook.setShowMatchesModal}
                   setSearchTerm={setSearchTerm}
                   openUrlPatternSettings={() => setUrlPatternSettingsOpen(true)}
+                  showAllCalls={showAllCalls}
+                  onToggleShowAllCalls={toggleShowAllCalls}
                 />
               </div>
             </div>

@@ -372,7 +372,7 @@ export function useLiveHar() {
             return;
           }
 
-          chrome.devtools.network.getHAR((harLog) => {
+          chrome.devtools.network.getHAR((harLog: any) => {
             // Get URL patterns from localStorage to filter dynamically
             let urlPatterns: any[] = [];
             try {
@@ -401,7 +401,13 @@ export function useLiveHar() {
               'hotjar', 'intercom', 'zendesk', '/images/', '/img/', '/icons/'
             ];
             
-            const entries = (harLog.entries || []).filter(entry => {
+            // Check if "Show All Calls" is enabled
+            let showAllCalls = false;
+            try {
+              showAllCalls = localStorage.getItem('har_show_all_calls') === 'true';
+            } catch {}
+            
+            const entries = (harLog.entries || []).filter((entry: any) => {
               const url = entry.request.url.toLowerCase();
               
               // First check if it's a static asset
@@ -411,6 +417,11 @@ export function useLiveHar() {
               
               if (isStaticAsset) {
                 return false;
+              }
+              
+              // If "Show All Calls" is enabled, include everything except static assets
+              if (showAllCalls) {
+                return true;
               }
               
               // Then check if it matches any enabled pattern (case-insensitive and more flexible)
@@ -484,12 +495,18 @@ export function useLiveHar() {
                       method = (req as any).method || "(unknown)";
                     } else if (patternType === 'http') {
                       endpoint = extractEndpointFromUrl(entry.request.url);
-                      method = `${endpoint}`;
+                      method = endpoint;
                     } else {
-                      method = (req as any).method || requestHttpMethod || "(unknown)";
+                      // Generic: show just the path, Type column shows HTTP method
+                      endpoint = extractEndpointFromUrl(entry.request.url);
+                      const cleanPath = `/${endpoint}`.replace(/\/+/g, '/').replace(/\/$/, '') || '/';
+                      method = cleanPath;
                     }
                   } else {
-                    method = (req as any).method || requestHttpMethod || "(unknown)";
+                    // No matched pattern: generic fallback
+                    endpoint = extractEndpointFromUrl(entry.request.url);
+                    const cleanPath = `/${endpoint}`.replace(/\/+/g, '/').replace(/\/$/, '') || '/';
+                    method = cleanPath;
                     patternType = 'generic';
                     httpMethod = requestHttpMethod;
                   }

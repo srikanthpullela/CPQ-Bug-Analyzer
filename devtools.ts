@@ -434,6 +434,19 @@ function shouldProcessUrl(url: string): UrlPattern | null {
   const currentPatterns = getUrlPatternsFromStorage();
   const enabledPatterns = currentPatterns.filter(p => p.enabled);
 
+  // Check if "Show All Calls" is enabled — bypass pattern filtering
+  try {
+    const showAll = localStorage.getItem('har_show_all_calls');
+    if (showAll === 'true') {
+      // Check if a specific pattern matches for better typing
+      const matchedPattern = enabledPatterns.find(pattern => {
+        const patternLower = pattern.pattern.toLowerCase();
+        return url.toLowerCase().includes(patternLower);
+      });
+      return matchedPattern || GENERIC_HTTP_PATTERN;
+    }
+  } catch {}
+
   // If the user has configured any enabled patterns, filter strictly — only
   // show requests that match one of them. Drop everything else (Conga-style).
   if (enabledPatterns.length > 0) {
@@ -524,21 +537,21 @@ function processRequestByPattern(request: any, reqJson: any, resJson: any, patte
       const endpoint = extractEndpointFromUrl(request.request.url);
       return {
         ...basePayload,
-        method: `${httpMethod} ${endpoint}`,
+        method: endpoint,
         endpoint,
-        displayName: `${pattern.name}: ${httpMethod} ${endpoint}`
+        displayName: `${pattern.name}: ${endpoint}`
       };
     
     case 'generic':
     default: {
-      // Generic HTTP: show "VERB /path" as the method — like DevTools Network panel.
+      // Generic HTTP: show just the path — the Type column already shows the HTTP method.
       const genericEndpoint = extractEndpointFromUrl(request.request.url);
-      const genericMethod = `${httpMethod} /${genericEndpoint}`.replace(/\/+/g, '/').replace(/\/$/, '');
+      const cleanPath = `/${genericEndpoint}`.replace(/\/+/g, '/').replace(/\/$/, '') || '/';
       return {
         ...basePayload,
-        method: genericMethod,
+        method: cleanPath,
         endpoint: genericEndpoint,
-        displayName: genericMethod
+        displayName: cleanPath
       };
     }
   }

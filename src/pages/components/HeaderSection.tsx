@@ -1,5 +1,5 @@
 import React from "react";
-import { RotateCcw, Moon, Sun, BarChart2, Search, Trash2, Zap, BellRing, Settings } from "lucide-react";
+import { RotateCcw, Moon, Sun, BarChart2, Search, Trash2, Zap, BellRing, Settings, Globe } from "lucide-react";
 import { SearchInput } from "./SearchInput";
 
 interface HeaderSectionProps {
@@ -21,6 +21,8 @@ interface HeaderSectionProps {
   setShowMatchesModal: (open: boolean) => void;
   setSearchTerm: (term: string) => void;
   openUrlPatternSettings: () => void;
+  showAllCalls: boolean;
+  onToggleShowAllCalls: () => void;
 }
 
 export const HeaderSection: React.FC<HeaderSectionProps> = ({
@@ -42,6 +44,8 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
   setShowMatchesModal,
   setSearchTerm,
   openUrlPatternSettings,
+  showAllCalls,
+  onToggleShowAllCalls,
 }) => {
   return (
     <div
@@ -106,6 +110,22 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
             title="Configure URL patterns"
           >
             <Settings className="h-3.5 w-3.5" />
+          </button>
+
+          <button
+            onClick={onToggleShowAllCalls}
+            className={`p-1 rounded transition-colors duration-75 ${
+              showAllCalls
+                ? isDarkMode
+                  ? "bg-indigo-600 hover:bg-indigo-500 text-white"
+                  : "bg-indigo-500 hover:bg-indigo-600 text-white"
+                : isDarkMode
+                  ? "bg-gray-700 hover:bg-gray-600 text-gray-300"
+                  : "bg-gray-100 hover:bg-gray-200 text-gray-600"
+            }`}
+            title={showAllCalls ? "Showing all calls (click to filter)" : "Showing filtered calls (click to show all)"}
+          >
+            <Globe className="h-3.5 w-3.5" />
           </button>
 
           <button
