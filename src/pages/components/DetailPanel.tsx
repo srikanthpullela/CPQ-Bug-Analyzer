@@ -98,6 +98,19 @@ function extractCleanPayload(data: any): any {
   return clean;
 }
 
+// Count occurrences of a search term in text
+function countStringMatches(text: string, query: string, caseSensitive: boolean): number {
+  if (!query.trim() || !text) return 0;
+  const term = caseSensitive ? query : query.toLowerCase();
+  const searchable = caseSensitive ? text : text.toLowerCase();
+  let count = 0;
+  let idx = searchable.indexOf(term);
+  while (idx !== -1) {
+    count++;
+    idx = searchable.indexOf(term, idx + 1);
+  }
+  return count;
+}
 
 
 // --- Sub-component: JSON content viewer (tree or raw with search) ---
@@ -106,7 +119,10 @@ const JsonContentView: React.FC<{
   isDarkMode: boolean;
   defaultCollapsed?: number | boolean;
   emptyMessage?: string;
-}> = ({ data, isDarkMode, defaultCollapsed = 2, emptyMessage }) => {
+  externalSearchQuery?: string;
+  externalCaseSensitive?: boolean;
+  externalMatchIndex?: number;
+}> = ({ data, isDarkMode, defaultCollapsed = 2, emptyMessage, externalSearchQuery, externalCaseSensitive, externalMatchIndex }) => {
   const [viewMode, setViewMode] = useState<"tree" | "raw">("tree");
   const [searchQuery, setSearchQuery] = useState("");
   const [searchVisible, setSearchVisible] = useState(false);
@@ -115,6 +131,17 @@ const JsonContentView: React.FC<{
   const [searchMatches, setSearchMatches] = useState<SearchMatch[]>([]);
   const searchInputRef = useRef<HTMLInputElement>(null);
   const rawJsonContainerRef = useRef<HTMLDivElement>(null);
+
+  // External search: parent controls query, case sensitivity, and match index
+  const isExternalSearch = externalSearchQuery !== undefined && externalSearchQuery.length > 0;
+  const effectiveQuery = isExternalSearch ? externalSearchQuery : searchQuery;
+  const effectiveCaseSensitive = isExternalSearch ? (externalCaseSensitive ?? false) : caseSensitive;
+  const effectiveMatchIndex = isExternalSearch ? (externalMatchIndex ?? 0) : currentMatchIndex;
+
+  // Force raw mode when external search is active
+  useEffect(() => {
+    if (isExternalSearch) setViewMode("raw");
+  }, [isExternalSearch]);
 
   const parsed = useMemo(() => deepParse(data), [data]);
   const formattedJSON = useMemo(() => JSON.stringify(parsed, null, 2), [parsed]);
@@ -127,8 +154,8 @@ const JsonContentView: React.FC<{
     (text: string, query: string): SearchMatch[] => {
       if (!query.trim()) return [];
       const matches: SearchMatch[] = [];
-      const term = caseSensitive ? query : query.toLowerCase();
-      const searchable = caseSensitive ? text : text.toLowerCase();
+      const term = effectiveCaseSensitive ? query : query.toLowerCase();
+      const searchable = effectiveCaseSensitive ? text : text.toLowerCase();
       let idx = searchable.indexOf(term);
       let mi = 0;
       while (idx !== -1) {
@@ -142,38 +169,39 @@ const JsonContentView: React.FC<{
       }
       return matches;
     },
-    [caseSensitive]
+    [effectiveCaseSensitive]
   );
 
   useEffect(() => {
-    if (searchQuery && viewMode === "raw") {
-      const m = findMatches(formattedJSON, searchQuery);
+    if (effectiveQuery && viewMode === "raw") {
+      const m = findMatches(formattedJSON, effectiveQuery);
       setSearchMatches(m);
-      setCurrentMatchIndex(0);
+      if (!isExternalSearch) setCurrentMatchIndex(0);
     } else {
       setSearchMatches([]);
-      setCurrentMatchIndex(0);
+      if (!isExternalSearch) setCurrentMatchIndex(0);
     }
-  }, [searchQuery, formattedJSON, viewMode, findMatches]);
+  }, [effectiveQuery, formattedJSON, viewMode, findMatches, isExternalSearch]);
 
   const goNext = useCallback(() => {
-    if (searchMatches.length > 0)
+    if (!isExternalSearch && searchMatches.length > 0)
       setCurrentMatchIndex((p) => (p + 1) % searchMatches.length);
-  }, [searchMatches.length]);
+  }, [searchMatches.length, isExternalSearch]);
 
   const goPrev = useCallback(() => {
-    if (searchMatches.length > 0)
+    if (!isExternalSearch && searchMatches.length > 0)
       setCurrentMatchIndex((p) => (p - 1 + searchMatches.length) % searchMatches.length);
-  }, [searchMatches.length]);
+  }, [searchMatches.length, isExternalSearch]);
 
   useEffect(() => {
-    if (searchMatches.length > 0 && currentMatchIndex >= 0 && viewMode === "raw") {
-      const el = document.getElementById(`search-match-${currentMatchIndex}`);
+    if (searchMatches.length > 0 && effectiveMatchIndex >= 0 && viewMode === "raw") {
+      const el = document.getElementById(`search-match-${effectiveMatchIndex}`);
       if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
     }
-  }, [currentMatchIndex, searchMatches, viewMode]);
+  }, [effectiveMatchIndex, searchMatches, viewMode]);
 
   useEffect(() => {
+    if (isExternalSearch) return; // Parent handles keyboard when global search is active
     const handler = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key === "f") {
         e.preventDefault();
@@ -193,10 +221,10 @@ const JsonContentView: React.FC<{
     };
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
-  }, [searchVisible, searchMatches.length, goNext, goPrev]);
+  }, [isExternalSearch, searchVisible, searchMatches.length, goNext, goPrev]);
 
   const renderHighlightedJSON = (jsonText: string) => {
-    if (!searchQuery.trim() || searchMatches.length === 0) {
+    if (!effectiveQuery.trim() || searchMatches.length === 0) {
       return (
         <pre className="whitespace-pre-wrap break-words" style={{ fontFamily: "Menlo, Monaco, Consolas, monospace", fontSize: "11px", lineHeight: "1.4" }}>
           {jsonText}
@@ -209,7 +237,7 @@ const JsonContentView: React.FC<{
       if (match.startIndex > lastIndex) {
         parts.push(<span key={`t-${lastIndex}`}>{jsonText.slice(lastIndex, match.startIndex)}</span>);
       }
-      const isCurrent = index === currentMatchIndex;
+      const isCurrent = index === effectiveMatchIndex;
       parts.push(
         <span
           key={`m-${index}`}
@@ -219,7 +247,7 @@ const JsonContentView: React.FC<{
               ? "bg-yellow-400 text-black font-semibold ring-2 ring-yellow-500"
               : "bg-yellow-200 text-black hover:bg-yellow-300"
           }`}
-          onClick={() => setCurrentMatchIndex(index)}
+          onClick={() => { if (!isExternalSearch) setCurrentMatchIndex(index); }}
         >
           {jsonText.slice(match.startIndex, match.endIndex)}
         </span>
@@ -246,9 +274,10 @@ const JsonContentView: React.FC<{
       <div className={`flex items-center justify-between px-2 py-1 border-b ${isDarkMode ? "border-gray-700" : "border-gray-200"}`}>
         <div className="flex items-center gap-3">
           <label className="flex items-center cursor-pointer">
-            <input type="radio" checked={viewMode === "tree"} onChange={() => setViewMode("tree")}
-              className={`w-3 h-3 text-blue-600 ${isDarkMode ? "bg-gray-600" : "bg-gray-100"}`} />
-            <span className={`ml-1 text-[11px] font-medium ${isDarkMode ? "text-gray-300" : "text-gray-700"}`}>Tree</span>
+            <input type="radio" checked={viewMode === "tree"} onChange={() => { if (!isExternalSearch) setViewMode("tree"); }}
+              disabled={isExternalSearch}
+              className={`w-3 h-3 text-blue-600 ${isDarkMode ? "bg-gray-600" : "bg-gray-100"} ${isExternalSearch ? "opacity-50" : ""}`} />
+            <span className={`ml-1 text-[11px] font-medium ${isDarkMode ? "text-gray-300" : "text-gray-700"} ${isExternalSearch ? "opacity-50" : ""}`}>Tree</span>
           </label>
           <label className="flex items-center cursor-pointer">
             <input type="radio" checked={viewMode === "raw"} onChange={() => setViewMode("raw")}
@@ -256,7 +285,7 @@ const JsonContentView: React.FC<{
             <span className={`ml-1 text-[11px] font-medium ${isDarkMode ? "text-gray-300" : "text-gray-700"}`}>Raw</span>
           </label>
         </div>
-        {viewMode === "raw" && (
+        {viewMode === "raw" && !isExternalSearch && (
           <button
             onClick={() => { setSearchVisible(!searchVisible); if (!searchVisible) setTimeout(() => searchInputRef.current?.focus(), 100); }}
             className={`text-[11px] px-1.5 py-0.5 rounded border ${
@@ -271,7 +300,7 @@ const JsonContentView: React.FC<{
       </div>
 
       {/* Search bar */}
-      {searchVisible && viewMode === "raw" && (
+      {searchVisible && viewMode === "raw" && !isExternalSearch && (
         <div className={`flex items-center gap-1 px-2 py-1 border-b ${isDarkMode ? "border-gray-700 bg-gray-800" : "border-gray-200 bg-gray-50"}`}>
           <input
             ref={searchInputRef}
@@ -320,11 +349,14 @@ const JsonContentView: React.FC<{
   );
 };
 
-// --- Sub-component: Headers view (like Chrome) ---
+// --- Sub-component: Headers view (like Chrome) with search highlighting ---
 const HeadersView: React.FC<{
   data: any;
   isDarkMode: boolean;
-}> = ({ data, isDarkMode }) => {
+  searchQuery?: string;
+  caseSensitive?: boolean;
+  currentMatchIndex?: number;
+}> = ({ data, isDarkMode, searchQuery, caseSensitive = false, currentMatchIndex = 0 }) => {
   const isHttp = data?._rowType === "http";
 
   const requestHeaders = isHttp
@@ -352,20 +384,63 @@ const HeadersView: React.FC<{
   const hasResponseHeaders = Object.keys(responseHeaders).length > 0;
   const hasGeneral = Object.keys(generalInfo).length > 0;
 
-  const Section: React.FC<{ title: string; entries: Record<string, string> }> = ({ title, entries }) => (
+  // Running match counter for cross-section indexing during render
+  let matchCounter = 0;
+
+  const highlightText = (text: string): React.ReactNode => {
+    if (!searchQuery || !searchQuery.trim()) return text;
+    const query = caseSensitive ? searchQuery : searchQuery.toLowerCase();
+    const searchable = caseSensitive ? text : text.toLowerCase();
+    const parts: React.ReactNode[] = [];
+    let lastIdx = 0;
+    let idx = searchable.indexOf(query);
+    if (idx === -1) return text;
+    while (idx !== -1) {
+      if (idx > lastIdx) parts.push(text.slice(lastIdx, idx));
+      const isCurrent = matchCounter === currentMatchIndex;
+      parts.push(
+        <span
+          key={`hm-${matchCounter}`}
+          id={`header-match-${matchCounter}`}
+          className={`px-0.5 rounded-sm ${
+            isCurrent
+              ? "bg-yellow-400 text-black font-semibold ring-2 ring-yellow-500"
+              : "bg-yellow-200 text-black"
+          }`}
+        >
+          {text.slice(idx, idx + searchQuery.length)}
+        </span>
+      );
+      matchCounter++;
+      lastIdx = idx + searchQuery.length;
+      idx = searchable.indexOf(query, idx + 1);
+    }
+    if (lastIdx < text.length) parts.push(text.slice(lastIdx));
+    return <>{parts}</>;
+  };
+
+  // Scroll to current match in headers
+  useEffect(() => {
+    if (searchQuery && currentMatchIndex !== undefined) {
+      const el = document.getElementById(`header-match-${currentMatchIndex}`);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  }, [currentMatchIndex, searchQuery]);
+
+  const renderSection = (sectionTitle: string, entries: Record<string, string>) => (
     <div className="mb-2">
       <div className={`text-[11px] font-semibold px-2 py-1 ${isDarkMode ? "text-gray-200" : "text-gray-800"}`}>
-        {title}
+        {sectionTitle}
       </div>
       <table className="w-full">
         <tbody>
           {Object.entries(entries).map(([k, v]) => (
             <tr key={k} className={`border-b ${isDarkMode ? "border-gray-700" : "border-gray-100"}`}>
               <td className={`px-2 py-0.5 text-[11px] font-medium whitespace-nowrap align-top ${isDarkMode ? "text-gray-400" : "text-gray-500"}`}>
-                {k}:
+                {highlightText(k)}:
               </td>
               <td className={`px-2 py-0.5 text-[11px] break-all ${isDarkMode ? "text-gray-200" : "text-gray-800"}`}>
-                {v}
+                {highlightText(v)}
               </td>
             </tr>
           ))}
@@ -384,9 +459,9 @@ const HeadersView: React.FC<{
 
   return (
     <div className="overflow-auto h-full p-1" style={{ fontFamily: "Menlo, Monaco, Consolas, monospace" }}>
-      {hasGeneral && <Section title="General" entries={generalInfo} />}
-      {hasResponseHeaders && <Section title="Response Headers" entries={responseHeaders} />}
-      {hasRequestHeaders && <Section title={isHttp ? "Request Headers" : "Connection Headers"} entries={requestHeaders} />}
+      {hasGeneral && renderSection("General", generalInfo)}
+      {hasResponseHeaders && renderSection("Response Headers", responseHeaders)}
+      {hasRequestHeaders && renderSection(isHttp ? "Request Headers" : "Connection Headers", requestHeaders)}
     </div>
   );
 };
@@ -403,6 +478,13 @@ export const DetailPanel: React.FC<Props> = ({
   isDarkMode = false,
 }) => {
   const [activeTab, setActiveTab] = useState<string>("preview");
+
+  // Global cross-tab search state
+  const [globalSearchQuery, setGlobalSearchQuery] = useState("");
+  const [globalSearchVisible, setGlobalSearchVisible] = useState(false);
+  const [globalCaseSensitive, setGlobalCaseSensitive] = useState(false);
+  const [globalSearchIndex, setGlobalSearchIndex] = useState(0);
+  const globalSearchInputRef = useRef<HTMLInputElement>(null);
 
   const isHttp = data?._rowType === "http";
   const isWs = data?._rowType === "ws";
@@ -461,6 +543,111 @@ export const DetailPanel: React.FC<Props> = ({
     if (isWs) return deepParse(data?.payload || {});
     return {};
   }, [data, isHttp, isWs]);
+
+  // Compute header data for global search match counting (mirrors HeadersView logic)
+  const headerData = useMemo(() => {
+    const reqHeaders = isHttp
+      ? formatHeadersArray(data?.headers?.requestHeaders || data?.headers?.request || [])
+      : formatHeadersArray(data?.headers?.connectionHeaders || []);
+    const resHeaders = isHttp
+      ? formatHeadersArray(data?.headers?.responseHeaders || data?.headers?.response || [])
+      : formatHeadersArray(data?.headers?.responseHeaders || []);
+    const genInfo: Record<string, string> = {};
+    if (isHttp) {
+      if (data?.headers?.url) genInfo["Request URL"] = data.headers.url;
+      if (data?.httpMethod || data?.headers?.method) genInfo["Request Method"] = data.httpMethod || data.headers?.method || "";
+      if (data?.status !== null && data?.status !== undefined) genInfo["Status Code"] = String(data.status);
+      if (data?.urlPattern) genInfo["URL Pattern"] = data.urlPattern;
+      if (data?.patternType) genInfo["Pattern Type"] = data.patternType;
+    } else {
+      if (data?.headers?.url || data?.endpoint) genInfo["URL"] = data?.headers?.url || data?.endpoint || "";
+      genInfo["Type"] = "WebSocket";
+      if (data?.direction) genInfo["Direction"] = data.direction;
+      if (data?.status !== null && data?.status !== undefined) genInfo["Status"] = String(data.status);
+    }
+    return { requestHeaders: reqHeaders, responseHeaders: resHeaders, generalInfo: genInfo };
+  }, [data, isHttp]);
+
+  // Count matches per tab for global search
+  const tabMatchCounts = useMemo(() => {
+    if (!globalSearchQuery.trim()) return {} as Record<string, number>;
+    const counts: Record<string, number> = {};
+    const q = globalSearchQuery;
+    const cs = globalCaseSensitive;
+
+    // Headers: count matches in key-value pairs (same order as HeadersView renders)
+    let headerCount = 0;
+    const { generalInfo, responseHeaders, requestHeaders } = headerData;
+    for (const [k, v] of Object.entries(generalInfo)) {
+      headerCount += countStringMatches(k, q, cs);
+      headerCount += countStringMatches(v, q, cs);
+    }
+    for (const [k, v] of Object.entries(responseHeaders)) {
+      headerCount += countStringMatches(k, q, cs);
+      headerCount += countStringMatches(v, q, cs);
+    }
+    for (const [k, v] of Object.entries(requestHeaders)) {
+      headerCount += countStringMatches(k, q, cs);
+      headerCount += countStringMatches(v, q, cs);
+    }
+    counts["headers"] = headerCount;
+
+    // Payload
+    if (payloadData && typeof payloadData === "object" && Object.keys(payloadData).length > 0) {
+      const payloadText = JSON.stringify(deepParse(payloadData), null, 2);
+      counts["payload"] = countStringMatches(payloadText, q, cs);
+    } else {
+      counts["payload"] = 0;
+    }
+
+    // Preview & Response (same underlying data)
+    const respText = JSON.stringify(responseData, null, 2);
+    counts["preview"] = countStringMatches(respText, q, cs);
+    counts["response"] = countStringMatches(respText, q, cs);
+
+    return counts;
+  }, [globalSearchQuery, globalCaseSensitive, headerData, payloadData, responseData]);
+
+  const totalGlobalMatches = useMemo(() => {
+    return Object.values(tabMatchCounts).reduce((sum, c) => sum + c, 0);
+  }, [tabMatchCounts]);
+
+  // Map global search index → { tabId, localIndex }
+  const globalPosition = useMemo(() => {
+    if (totalGlobalMatches === 0 || !globalSearchQuery.trim()) return null;
+    let remaining = ((globalSearchIndex % totalGlobalMatches) + totalGlobalMatches) % totalGlobalMatches;
+    for (const tab of tabs) {
+      const count = tabMatchCounts[tab.id] || 0;
+      if (count === 0) continue;
+      if (remaining < count) {
+        return { tabId: tab.id, localIndex: remaining };
+      }
+      remaining -= count;
+    }
+    return null;
+  }, [globalSearchIndex, totalGlobalMatches, tabs, tabMatchCounts, globalSearchQuery]);
+
+  // Auto-switch to the tab containing the current match
+  useEffect(() => {
+    if (globalPosition && globalSearchQuery.trim()) {
+      setActiveTab(globalPosition.tabId);
+    }
+  }, [globalPosition, globalSearchQuery]);
+
+  // Reset search index when query, case sensitivity, or row data changes
+  useEffect(() => {
+    setGlobalSearchIndex(0);
+  }, [globalSearchQuery, globalCaseSensitive, data]);
+
+  const globalGoNext = useCallback(() => {
+    if (totalGlobalMatches > 0)
+      setGlobalSearchIndex((p) => (p + 1) % totalGlobalMatches);
+  }, [totalGlobalMatches]);
+
+  const globalGoPrev = useCallback(() => {
+    if (totalGlobalMatches > 0)
+      setGlobalSearchIndex((p) => (p - 1 + totalGlobalMatches) % totalGlobalMatches);
+  }, [totalGlobalMatches]);
 
   const finalUrl = useMemo(() => {
     if (data?.requestPayload?._url || data?.requestPayload?.url) {
@@ -543,7 +730,24 @@ export const DetailPanel: React.FC<Props> = ({
             </span>
           )}
         </span>
+      {/* Global search toggle in title bar */}
         <div className="flex items-center gap-1.5">
+          <button
+            onClick={() => {
+              setGlobalSearchVisible(!globalSearchVisible);
+              if (!globalSearchVisible) setTimeout(() => globalSearchInputRef.current?.focus(), 100);
+            }}
+            className={`p-1 rounded ${
+              globalSearchVisible
+                ? isDarkMode ? "text-blue-300 bg-blue-900/50" : "text-blue-600 bg-blue-50"
+                : isDarkMode ? "text-gray-400 hover:text-gray-200 hover:bg-gray-700" : "text-gray-400 hover:text-gray-600 hover:bg-gray-100"
+            }`}
+            title="Global Search (across all tabs)"
+          >
+            <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+            </svg>
+          </button>
           {canResend && onEditRequest && (
             <button
               onClick={() => {
@@ -585,6 +789,63 @@ export const DetailPanel: React.FC<Props> = ({
         </div>
       </div>
 
+      {/* Global search bar */}
+      {globalSearchVisible && (
+        <div className={`flex-shrink-0 flex items-center gap-1.5 px-2 py-1.5 border-b ${isDarkMode ? "border-gray-700 bg-gray-750" : "border-gray-200 bg-gray-50"}`}>
+          <svg className={`w-3.5 h-3.5 flex-shrink-0 ${isDarkMode ? "text-gray-500" : "text-gray-400"}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+          </svg>
+          <input
+            ref={globalSearchInputRef}
+            type="text"
+            value={globalSearchQuery}
+            onChange={(e) => setGlobalSearchQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                e.shiftKey ? globalGoPrev() : globalGoNext();
+              }
+              if (e.key === "Escape") {
+                setGlobalSearchVisible(false);
+                setGlobalSearchQuery("");
+              }
+            }}
+            placeholder="Search across all tabs..."
+            className={`flex-1 px-1.5 py-0.5 text-[11px] border rounded ${isDarkMode ? "border-gray-600 bg-gray-700 text-gray-100 placeholder-gray-500" : "border-gray-300 bg-white text-gray-900 placeholder-gray-400"}`}
+          />
+          <button onClick={globalGoPrev} disabled={totalGlobalMatches === 0}
+            className={`p-0.5 rounded disabled:opacity-30 ${isDarkMode ? "text-gray-400 hover:text-white" : "text-gray-500 hover:text-black"}`}
+            title="Previous match (Shift+Enter)">
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 15l7-7 7 7" /></svg>
+          </button>
+          <button onClick={globalGoNext} disabled={totalGlobalMatches === 0}
+            className={`p-0.5 rounded disabled:opacity-30 ${isDarkMode ? "text-gray-400 hover:text-white" : "text-gray-500 hover:text-black"}`}
+            title="Next match (Enter)">
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" /></svg>
+          </button>
+          <label className="flex items-center cursor-pointer flex-shrink-0">
+            <input type="checkbox" checked={globalCaseSensitive} onChange={(e) => setGlobalCaseSensitive(e.target.checked)}
+              className={`w-3 h-3 rounded ${isDarkMode ? "bg-gray-600" : "bg-gray-100"}`} />
+            <span className={`ml-1 text-[10px] ${isDarkMode ? "text-gray-400" : "text-gray-500"}`}>Aa</span>
+          </label>
+          {totalGlobalMatches > 0 && (
+            <span className={`text-[10px] flex-shrink-0 ${isDarkMode ? "text-blue-300" : "text-blue-600"}`}>
+              {(((globalSearchIndex % totalGlobalMatches) + totalGlobalMatches) % totalGlobalMatches) + 1}/{totalGlobalMatches}
+            </span>
+          )}
+          {globalSearchQuery.trim() && totalGlobalMatches === 0 && (
+            <span className={`text-[10px] flex-shrink-0 ${isDarkMode ? "text-red-400" : "text-red-500"}`}>
+              No matches
+            </span>
+          )}
+          <button onClick={() => { setGlobalSearchVisible(false); setGlobalSearchQuery(""); }}
+            className={`p-0.5 rounded ${isDarkMode ? "text-gray-400 hover:text-white" : "text-gray-500 hover:text-black"}`}
+            title="Close search">
+            <svg className="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
+          </button>
+        </div>
+      )}
+
       {/* Chrome-style tab bar */}
       <div className={`flex-shrink-0 flex border-b ${isDarkMode ? "border-gray-700 bg-gray-800" : "border-gray-200 bg-white"}`}>
         {tabs.map((tab) => (
@@ -602,6 +863,15 @@ export const DetailPanel: React.FC<Props> = ({
             }`}
           >
             {tab.label}
+            {globalSearchQuery.trim() && (tabMatchCounts[tab.id] || 0) > 0 && (
+              <span className={`ml-1 text-[9px] px-1 py-0.5 rounded-full ${
+                globalPosition?.tabId === tab.id
+                  ? isDarkMode ? "bg-yellow-500/30 text-yellow-300" : "bg-yellow-100 text-yellow-700"
+                  : isDarkMode ? "bg-gray-600 text-gray-300" : "bg-gray-200 text-gray-600"
+              }`}>
+                {tabMatchCounts[tab.id]}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -609,7 +879,13 @@ export const DetailPanel: React.FC<Props> = ({
       {/* Tab content */}
       <div className={`flex-1 min-h-0 ${isDarkMode ? "bg-gray-900" : "bg-gray-50"}`}>
         {activeTab === "headers" && (
-          <HeadersView data={data} isDarkMode={isDarkMode} />
+          <HeadersView
+            data={data}
+            isDarkMode={isDarkMode}
+            searchQuery={globalSearchQuery.trim() && globalPosition?.tabId === "headers" ? globalSearchQuery : undefined}
+            caseSensitive={globalCaseSensitive}
+            currentMatchIndex={globalPosition?.tabId === "headers" ? globalPosition.localIndex : 0}
+          />
         )}
 
         {activeTab === "payload" && isHttp && (
@@ -618,6 +894,9 @@ export const DetailPanel: React.FC<Props> = ({
             isDarkMode={isDarkMode}
             defaultCollapsed={1}
             emptyMessage="No request payload"
+            externalSearchQuery={globalSearchQuery.trim() && globalPosition?.tabId === "payload" ? globalSearchQuery : undefined}
+            externalCaseSensitive={globalCaseSensitive}
+            externalMatchIndex={globalPosition?.tabId === "payload" ? globalPosition.localIndex : undefined}
           />
         )}
 
@@ -627,6 +906,9 @@ export const DetailPanel: React.FC<Props> = ({
             isDarkMode={isDarkMode}
             defaultCollapsed={2}
             emptyMessage="No preview available"
+            externalSearchQuery={globalSearchQuery.trim() && globalPosition?.tabId === "preview" ? globalSearchQuery : undefined}
+            externalCaseSensitive={globalCaseSensitive}
+            externalMatchIndex={globalPosition?.tabId === "preview" ? globalPosition.localIndex : undefined}
           />
         )}
 
@@ -636,6 +918,9 @@ export const DetailPanel: React.FC<Props> = ({
             isDarkMode={isDarkMode}
             defaultCollapsed={false}
             emptyMessage="No response data"
+            externalSearchQuery={globalSearchQuery.trim() && globalPosition?.tabId === "response" ? globalSearchQuery : undefined}
+            externalCaseSensitive={globalCaseSensitive}
+            externalMatchIndex={globalPosition?.tabId === "response" ? globalPosition.localIndex : undefined}
           />
         )}
       </div>
