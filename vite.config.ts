@@ -3,7 +3,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import { resolve, dirname } from "path";
 import { fileURLToPath } from "url";
-import { copyFileSync } from "fs";
+import { copyFileSync, mkdirSync, existsSync } from "fs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -15,11 +15,14 @@ export default defineConfig({
       name: "copy-static-files",
       apply: "build",
       closeBundle() {
-        copyFileSync("manifest.json", "dist/manifest.json");
-        copyFileSync("background.js", "dist/background.js");
-        copyFileSync("public/icon-16.png", "dist/icon-16.png");
-        copyFileSync("public/icon-48.png", "dist/icon-48.png");
-        copyFileSync("public/icon-128.png", "dist/icon-128.png");
+        const root = __dirname;
+        const dist = resolve(root, "dist");
+        if (!existsSync(dist)) mkdirSync(dist, { recursive: true });
+        copyFileSync(resolve(root, "manifest.json"), resolve(dist, "manifest.json"));
+        copyFileSync(resolve(root, "background.js"), resolve(dist, "background.js"));
+        copyFileSync(resolve(root, "public/icon-16.png"), resolve(dist, "icon-16.png"));
+        copyFileSync(resolve(root, "public/icon-48.png"), resolve(dist, "icon-48.png"));
+        copyFileSync(resolve(root, "public/icon-128.png"), resolve(dist, "icon-128.png"));
       },
     },
   ],

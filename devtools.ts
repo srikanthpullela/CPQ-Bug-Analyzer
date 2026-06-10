@@ -21,6 +21,237 @@ declare const chrome: any;
 const attachedTargetIds = new Set<string>();
 
 // ========================
+// CDP HELPER: Enable Network with Durable Messages
+// ========================
+// Calls Network.enable + Network.configureDurableMessages so response bodies
+// survive cross-process SPA navigations (common in Salesforce/CPQ apps).
+function enableNetworkDomain(target: any, callback?: () => void) {
+  chrome.debugger.sendCommand(target, "Network.enable", {
+    maxTotalBufferSize: 100_000_000,
+    maxResourceBufferSize: 50_000_000,
+  }, () => {
+    if (chrome.runtime.lastError) {
+      console.log("⚠️ Network.enable failed:", chrome.runtime.lastError.message);
+    }
+    // Configure durable messages to preserve response bodies across navigations
+    try {
+      chrome.debugger.sendCommand(target, "Network.configureDurableMessages", {
+        maxTotalBufferSize: 100_000_000,
+        maxResourceBufferSize: 50_000_000,
+      }, () => {
+        if (chrome.runtime.lastError) {
+          // Older Chrome versions don't support this — safe to ignore
+          console.debug("Network.configureDurableMessages not available:", chrome.runtime.lastError.message);
+        } else {
+          console.log("✅ Network.configureDurableMessages enabled");
+        }
+        if (callback) callback();
+      });
+    } catch {
+      if (callback) callback();
+    }
+  });
+}
+
+// ========================
+// MCP THIRD-PARTY TOOLS
+// ========================
+// Registers Conga Debugger data as MCP tools via the Chrome DevTools MCP server.
+// When the MCP server dispatches a 'devtoolstooldiscovery' event, our injected
+// script responds with tools that let AI agents query captured HTTP/WS data.
+// Requires --categoryExperimentalThirdParty=true on the MCP server.
+const MCP_TOOLS_SCRIPT = `
+(function() {
+  if (window.__CONGA_MCP_REGISTERED__) return 'already_registered';
+  window.__CONGA_MCP_REGISTERED__ = true;
+
+  // Shared data store populated by the extension via postMessage
+  if (!window.__CONGA_CAPTURED_DATA__) {
+    window.__CONGA_CAPTURED_DATA__ = { httpRequests: [], wsMessages: [], sseEvents: [] };
+  }
+  var store = window.__CONGA_CAPTURED_DATA__;
+
+  // Listen for data pushed from the extension's devtools script
+  window.addEventListener('message', function(event) {
+    if (!event.data || event.data.source !== 'CONGA_MCP_DATA') return;
+    var type = event.data.type;
+    var payload = event.data.payload;
+    if (type === 'HTTP') {
+      store.httpRequests.push(payload);
+      if (store.httpRequests.length > 5000) store.httpRequests = store.httpRequests.slice(-3000);
+    } else if (type === 'WS') {
+      store.wsMessages.push(payload);
+      if (store.wsMessages.length > 10000) store.wsMessages = store.wsMessages.slice(-5000);
+    } else if (type === 'SSE') {
+      store.sseEvents.push(payload);
+      if (store.sseEvents.length > 5000) store.sseEvents = store.sseEvents.slice(-3000);
+    } else if (type === 'CLEAR') {
+      store.httpRequests = [];
+      store.wsMessages = [];
+      store.sseEvents = [];
+    }
+  });
+
+  // Register MCP tools when the DevTools MCP server discovers tools
+  window.addEventListener('devtoolstooldiscovery', function(event) {
+    if (typeof event.respondWith !== 'function') return;
+
+    event.respondWith({
+      name: 'Conga CPQ Debugger',
+      description: 'Provides captured Conga CPQ network traffic, WebSocket messages, and SSE events for debugging',
+      tools: [
+        {
+          name: 'get_captured_http_requests',
+          description: 'Returns captured HTTP/API requests with optional filtering by URL pattern, status code, or method',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              urlFilter: { type: 'string', description: 'Filter requests by URL substring (case-insensitive)' },
+              statusFilter: { type: 'number', description: 'Filter by exact HTTP status code' },
+              methodFilter: { type: 'string', description: 'Filter by HTTP method (GET, POST, etc.)' },
+              failedOnly: { type: 'boolean', description: 'If true, return only failed requests (status >= 400 or 0)' },
+              limit: { type: 'number', description: 'Max number of results (default 50)' }
+            }
+          },
+          execute: function(args) {
+            var results = store.httpRequests;
+            if (args.urlFilter) {
+              var f = args.urlFilter.toLowerCase();
+              results = results.filter(function(r) { return (r.url || r.endpoint || '').toLowerCase().includes(f); });
+            }
+            if (args.statusFilter !== undefined) {
+              results = results.filter(function(r) { return r.status === args.statusFilter; });
+            }
+            if (args.methodFilter) {
+              var m = args.methodFilter.toUpperCase();
+              results = results.filter(function(r) { return (r.httpMethod || '').toUpperCase() === m; });
+            }
+            if (args.failedOnly) {
+              results = results.filter(function(r) { return r.status >= 400 || r.status === 0; });
+            }
+            var limit = args.limit || 50;
+            return { total: results.length, requests: results.slice(-limit) };
+          }
+        },
+        {
+          name: 'get_captured_ws_messages',
+          description: 'Returns captured WebSocket messages with optional filtering by endpoint, action, or direction',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              endpointFilter: { type: 'string', description: 'Filter by endpoint/TaskId substring' },
+              actionFilter: { type: 'string', description: 'Filter by action name substring' },
+              direction: { type: 'string', description: 'Filter by direction: sent or received' },
+              limit: { type: 'number', description: 'Max number of results (default 100)' }
+            }
+          },
+          execute: function(args) {
+            var results = store.wsMessages;
+            if (args.endpointFilter) {
+              var f = args.endpointFilter.toLowerCase();
+              results = results.filter(function(m) { return (m.endpoint || '').toLowerCase().includes(f); });
+            }
+            if (args.actionFilter) {
+              var f2 = args.actionFilter.toLowerCase();
+              results = results.filter(function(m) { return (m.action || '').toLowerCase().includes(f2); });
+            }
+            if (args.direction) {
+              results = results.filter(function(m) { return m.direction === args.direction; });
+            }
+            var limit = args.limit || 100;
+            return { total: results.length, messages: results.slice(-limit) };
+          }
+        },
+        {
+          name: 'get_failed_requests',
+          description: 'Returns all failed HTTP requests (status >= 400 or status 0) and WebSocket errors',
+          inputSchema: { type: 'object', properties: {} },
+          execute: function() {
+            var failedHttp = store.httpRequests.filter(function(r) { return r.status >= 400 || r.status === 0; });
+            var failedWs = store.wsMessages.filter(function(m) {
+              return (m.status && m.status >= 400) || (m.payload && m.payload.StatusCode && m.payload.StatusCode >= 400);
+            });
+            return { failedHttp: failedHttp, failedWs: failedWs, totalFailed: failedHttp.length + failedWs.length };
+          }
+        },
+        {
+          name: 'get_request_timeline',
+          description: 'Returns a chronological timeline of all captured HTTP and WS events, useful for understanding request ordering',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              limit: { type: 'number', description: 'Max events to return (default 100)' }
+            }
+          },
+          execute: function(args) {
+            var limit = args.limit || 100;
+            var timeline = [];
+            store.httpRequests.forEach(function(r) {
+              timeline.push({ type: 'HTTP', timestamp: r.timestamp, endpoint: r.endpoint || r.url, method: r.httpMethod, status: r.status, duration: r.endTime ? (r.endTime - r.timestamp) + 'ms' : undefined });
+            });
+            store.wsMessages.forEach(function(m) {
+              timeline.push({ type: 'WS', timestamp: m.timestamp, endpoint: m.endpoint, action: m.action, direction: m.direction, status: m.status, duration: m.duration });
+            });
+            timeline.sort(function(a, b) { return (a.timestamp || 0) - (b.timestamp || 0); });
+            return { total: timeline.length, events: timeline.slice(-limit) };
+          }
+        },
+        {
+          name: 'search_requests',
+          description: 'Full-text search across all captured request and response data',
+          inputSchema: {
+            type: 'object',
+            properties: {
+              query: { type: 'string', description: 'Search term to look for in request/response payloads' }
+            },
+            required: ['query']
+          },
+          execute: function(args) {
+            var q = (args.query || '').toLowerCase();
+            if (!q) return { results: [] };
+            var results = [];
+            store.httpRequests.forEach(function(r) {
+              var str = JSON.stringify(r).toLowerCase();
+              if (str.includes(q)) {
+                results.push({ type: 'HTTP', endpoint: r.endpoint || r.url, status: r.status, timestamp: r.timestamp });
+              }
+            });
+            store.wsMessages.forEach(function(m) {
+              var str = JSON.stringify(m).toLowerCase();
+              if (str.includes(q)) {
+                results.push({ type: 'WS', endpoint: m.endpoint, action: m.action, direction: m.direction, timestamp: m.timestamp });
+              }
+            });
+            return { total: results.length, results: results.slice(0, 50) };
+          }
+        }
+      ]
+    });
+  });
+
+  return 'registered';
+})();
+`;
+
+function injectMcpTools() {
+  chrome.devtools.inspectedWindow.eval(MCP_TOOLS_SCRIPT, (result: any, isException: any) => {
+    if (isException) {
+      console.log("⚠️ MCP tools injection failed:", isException);
+    } else {
+      console.log("🤖 MCP tools:", result);
+    }
+  });
+}
+
+// Forward captured data to the page-level MCP store
+function pushToMcpStore(panelWindow: any, type: string, payload: any) {
+  chrome.devtools.inspectedWindow.eval(
+    `window.postMessage({ source: 'CONGA_MCP_DATA', type: ${JSON.stringify(type)}, payload: ${JSON.stringify(payload)} }, '*')`,
+    () => {} // fire-and-forget
+  );
+}
+
+// ========================
 // WS INTERCEPTOR FALLBACK
 // ========================
 // When chrome.debugger can't attach (e.g., another extension is using it),
@@ -155,10 +386,7 @@ function startDebuggerRetry(debuggee: any, panelWindow: any) {
         stopDebuggerRetry();
 
         try {
-          chrome.debugger.sendCommand(debuggee, "Network.enable", {
-            maxTotalBufferSize: 100_000_000,
-            maxResourceBufferSize: 50_000_000,
-          });
+          enableNetworkDomain(debuggee);
           chrome.debugger.sendCommand(debuggee, "Network.setCacheDisabled", { cacheDisabled: true });
           chrome.debugger.sendCommand(debuggee, "Page.enable", {});
           chrome.debugger.sendCommand(debuggee, "Target.setAutoAttach", {
@@ -286,20 +514,24 @@ function processInterceptedWsMessage(msg: any, panelWindow: any) {
     }
   }
 
+  const wsPayloadForInterceptor = {
+    endpoint,
+    action,
+    payload: topLevel,
+    status,
+    direction: msg.direction,
+    timestamp: msg.timestamp,
+    time: timestamp.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+    duration,
+  };
+
   panelWindow.postMessage({
     source: "HAR_EXTRACTOR",
     type: "WS",
-    payload: {
-      endpoint,
-      action,
-      payload: topLevel,
-      status,
-      direction: msg.direction,
-      timestamp: msg.timestamp,
-      time: timestamp.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
-      duration,
-    },
+    payload: wsPayloadForInterceptor,
   }, "*");
+  // Push to MCP store for AI agent access
+  pushToMcpStore(panelWindow, 'WS', wsPayloadForInterceptor);
 }
 
 // URL Pattern Configuration System
@@ -564,6 +796,48 @@ function getPatternHash(patterns: UrlPattern[]): string {
   return JSON.stringify(patterns.map(p => ({ name: p.name, pattern: p.pattern, enabled: p.enabled })));
 }
 
+// ========================
+// PERFORMANCE PANEL SYNC (Chrome 129+)
+// ========================
+// Sync network/WS capture with the DevTools Performance panel recording.
+let isPerformanceProfiling = false;
+let profilingStartTime: number | null = null;
+
+try {
+  if (chrome.devtools?.performance) {
+    chrome.devtools.performance.onProfilingStarted.addListener(() => {
+      isPerformanceProfiling = true;
+      profilingStartTime = Date.now();
+      console.log("📊 Performance profiling started — tagging capture window");
+      if (currentPanelWindow) {
+        currentPanelWindow.postMessage({
+          source: "HAR_EXTRACTOR",
+          type: "PERF_PROFILING_STARTED",
+          payload: { startTime: profilingStartTime }
+        }, "*");
+      }
+    });
+
+    chrome.devtools.performance.onProfilingStopped.addListener(() => {
+      const endTime = Date.now();
+      console.log("📊 Performance profiling stopped — capture window:",
+        profilingStartTime ? `${((endTime - profilingStartTime) / 1000).toFixed(1)}s` : "unknown");
+      isPerformanceProfiling = false;
+      if (currentPanelWindow) {
+        currentPanelWindow.postMessage({
+          source: "HAR_EXTRACTOR",
+          type: "PERF_PROFILING_STOPPED",
+          payload: { startTime: profilingStartTime, endTime }
+        }, "*");
+      }
+      profilingStartTime = null;
+    });
+    console.log("✅ Performance panel sync registered");
+  }
+} catch (e) {
+  console.debug("chrome.devtools.performance not available (requires Chrome 129+)");
+}
+
 chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (panel: any) => {
   let currentTabId: number | null = null;
   // Track pending network requests for loading state
@@ -613,6 +887,33 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
         
         console.log("🔄 DevTools received HAR_RETRIGGER via chrome.runtime for tab:", currentTabId, message);
         
+        // Try Network.replayXHR first (CDP native replay, preserves exact headers/auth)
+        const requestId = message.requestId;
+        if (debuggerAttached && requestId) {
+          console.log("🔄 Attempting Network.replayXHR with requestId:", requestId);
+          try {
+            chrome.debugger.sendCommand(debuggee, "Network.replayXHR", {
+              requestId: requestId
+            }, () => {
+              if (chrome.runtime.lastError) {
+                console.log("🔄 Network.replayXHR failed, falling back to fetch():", chrome.runtime.lastError.message);
+                retriggerViaFetch(message, panelWindow);
+              } else {
+                console.log("✅ Network.replayXHR succeeded for:", requestId);
+              }
+            });
+            return;
+          } catch (e) {
+            console.log("🔄 Network.replayXHR threw, falling back to fetch():", (e as any)?.message);
+          }
+        }
+        
+        // Fallback: manual fetch injection
+        retriggerViaFetch(message, panelWindow);
+      }
+    };
+
+    function retriggerViaFetch(message: any, panelWindow: any) {
         const method = message.method || 'POST';
         const url = message.url;
         const payload = message.payload;
@@ -732,8 +1033,7 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
             console.log("🔄 Script evaluation result:", result);
           }
         });
-      }
-    };
+    }
 
     // Add the listener
     chrome.runtime.onMessage.addListener(messageListener);
@@ -804,10 +1104,7 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
         console.log("✅ Debugger attached successfully to tab:", currentTabId);
 
         try {
-          chrome.debugger.sendCommand(debuggee, "Network.enable", {
-            maxTotalBufferSize: 100_000_000,
-            maxResourceBufferSize: 50_000_000
-          });
+          enableNetworkDomain(debuggee);
           chrome.debugger.sendCommand(debuggee, "Network.setCacheDisabled", { cacheDisabled: true });
           chrome.debugger.sendCommand(debuggee, "Page.enable", {});
         } catch (e) {
@@ -882,6 +1179,7 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
     currentPanelWindow = panelWindow;
     debuggerWsActive = false;
     injectWsInterceptor();
+    injectMcpTools();
     startWsPolling(panelWindow);
 
     // Re-inject WS interceptor on page navigation (works without debugger)
@@ -905,6 +1203,8 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
             { source: "HAR_EXTRACTOR", type: "CLEAR" },
             "*"
           );
+          // Clear MCP data store on navigation
+          pushToMcpStore(currentPanelWindow, 'CLEAR', null);
         }
 
         // Re-inject interceptor after a short delay for page context to be ready
@@ -913,6 +1213,8 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
         setTimeout(() => injectWsInterceptor(), 500);
         // Third inject at 1.5s for very slow pages
         setTimeout(() => injectWsInterceptor(), 1500);
+        // Re-inject MCP tools after navigation
+        setTimeout(() => injectMcpTools(), 600);
 
         // After navigation the debugger detaches. We do NOT eagerly re-attach
         // here — the WS interceptor will trigger attachDebuggerForWs() lazily
@@ -1002,6 +1304,14 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
             },
             "*"
           );
+
+          // Push to MCP store for AI agent access
+          pushToMcpStore(panelWindow, 'HTTP', {
+            ...processedPayload,
+            timestamp: startTime,
+            endTime,
+            url,
+          });
         });
       });
       console.log("✅ onRequestFinished listener registered (works without debugger)");
@@ -1035,18 +1345,7 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
         // where the WS connection lives inside a sub-target.
         if (sessionId) {
           try {
-            chrome.debugger.sendCommand(
-              { ...debuggee, sessionId },
-              "Network.enable",
-              { maxTotalBufferSize: 100_000_000, maxResourceBufferSize: 50_000_000 },
-              () => {
-                if (chrome.runtime.lastError) {
-                  console.log("⚠️ Network.enable on child session failed:", chrome.runtime.lastError.message);
-                } else {
-                  console.log("✅ Network.enable on child session:", sessionId);
-                }
-              }
-            );
+            enableNetworkDomain({ ...debuggee, sessionId });
           } catch (e) {
             console.log("⚠️ Error enabling Network on child session:", (e as any)?.message || e);
           }
@@ -1144,6 +1443,97 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
       if (method === "Network.responseReceived" || method === "Network.loadingFinished") {
         console.log(`📡 Network event: ${method} - scheduling reload to capture final status`);
         scheduleHarReload();
+      }
+
+      // ── Streaming response capture (SSE, chunked JSON) ──────────────
+      // When a streaming response is detected, enable real-time chunk capture
+      if (method === "Network.responseReceived") {
+        const contentType = (params?.response?.headers?.["content-type"] || params?.response?.headers?.["Content-Type"] || "").toLowerCase();
+        const isStreaming = contentType.includes("text/event-stream") ||
+          contentType.includes("application/x-ndjson") ||
+          contentType.includes("application/stream+json");
+        if (isStreaming && params?.requestId) {
+          console.log("📡 Streaming response detected — enabling streamResourceContent for:", params.requestId);
+          try {
+            chrome.debugger.sendCommand(debuggee, "Network.streamResourceContent", {
+              requestId: params.requestId
+            }, (result: any) => {
+              if (chrome.runtime.lastError) {
+                console.debug("Network.streamResourceContent not available:", chrome.runtime.lastError.message);
+              } else {
+                console.log("✅ Streaming enabled for request:", params.requestId);
+                panelWindow.postMessage({
+                  source: "HAR_EXTRACTOR",
+                  type: "STREAMING_STARTED",
+                  payload: { requestId: params.requestId, contentType }
+                }, "*");
+              }
+            });
+          } catch {}
+        }
+      }
+
+      // Forward streaming data chunks to panel
+      if (method === "Network.dataReceived" && params?.data) {
+        try {
+          const chunk = atob(params.data);
+          panelWindow.postMessage({
+            source: "HAR_EXTRACTOR",
+            type: "STREAMING_CHUNK",
+            payload: {
+              requestId: params.requestId,
+              data: chunk,
+              timestamp: Date.now(),
+              dataLength: params.dataLength,
+              encodedDataLength: params.encodedDataLength
+            }
+          }, "*");
+        } catch {}
+      }
+
+      // ── Server-Sent Events (SSE) — pre-parsed by Chrome ────────────
+      if (method === "Network.eventSourceMessageReceived") {
+        panelWindow.postMessage({
+          source: "HAR_EXTRACTOR",
+          type: "SSE_EVENT",
+          payload: {
+            requestId: params?.requestId,
+            eventName: params?.eventName || "message",
+            eventId: params?.eventId || "",
+            data: params?.data || "",
+            timestamp: Date.now()
+          }
+        }, "*");
+        return;
+      }
+
+      // ── WebTransport lifecycle events (HTTP/3 future-proofing) ─────
+      if (method === "Network.webTransportCreated") {
+        console.log("🚀 WebTransport created:", { url: params?.url, transportId: params?.transportId });
+        panelWindow.postMessage({
+          source: "HAR_EXTRACTOR",
+          type: "WEBTRANSPORT_CREATED",
+          payload: { url: params?.url, transportId: params?.transportId, timestamp: Date.now() }
+        }, "*");
+        return;
+      }
+      if (method === "Network.webTransportConnectionEstablished") {
+        console.log("✅ WebTransport established:", params?.transportId);
+        panelWindow.postMessage({
+          source: "HAR_EXTRACTOR",
+          type: "WEBTRANSPORT_ESTABLISHED",
+          payload: { transportId: params?.transportId, timestamp: Date.now() }
+        }, "*");
+        return;
+      }
+      if (method === "Network.webTransportClosed") {
+        console.log("🔒 WebTransport closed:", params?.transportId);
+        panelWindow.postMessage({
+          source: "HAR_EXTRACTOR",
+          type: "WEBTRANSPORT_CLOSED",
+          payload: { transportId: params?.transportId, timestamp: Date.now() }
+        }, "*");
+        return;
       }
 
       // Clear tables on page navigation/reload
@@ -1416,6 +1806,8 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
           },
           "*"
         );
+        // Push to MCP store for AI agent access
+        pushToMcpStore(panelWindow, 'WS', wsPayload);
         scheduleHarReload();
         return;
       }
@@ -1436,10 +1828,7 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
         if (inactive) {
           console.log("⏱️ WS inactivity detected - re-enabling Network/Targets");
           try {
-            chrome.debugger.sendCommand(debuggee, "Network.enable", {
-              maxTotalBufferSize: 100_000_000,
-              maxResourceBufferSize: 50_000_000
-            });
+            enableNetworkDomain(debuggee);
             chrome.debugger.sendCommand(debuggee, "Page.enable", {});
             chrome.debugger.sendCommand(debuggee, "Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
             chrome.debugger.sendCommand(debuggee, "Target.setDiscoverTargets", { discover: true });
@@ -1457,10 +1846,7 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
             // Disable then re-enable Network to force Chrome to re-emit WS events
             chrome.debugger.sendCommand(debuggee, "Network.disable", {}, () => {
               if (!debuggerAttached) return;
-              chrome.debugger.sendCommand(debuggee, "Network.enable", {
-                maxTotalBufferSize: 100_000_000,
-                maxResourceBufferSize: 50_000_000
-              });
+              enableNetworkDomain(debuggee);
             });
             // Try auto-attach without flatten for broader compatibility
             chrome.debugger.sendCommand(debuggee, "Target.setAutoAttach", {
@@ -1938,11 +2324,8 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
             
             // Try to enable domains, ignore any errors
             try {
-              chrome.debugger.sendCommand(debuggee, "Network.enable", {
-                maxTotalBufferSize: 100_000_000,
-                maxResourceBufferSize: 50_000_000
-              }, () => {
-                console.log("📡 Network.enable sent (may have failed silently)");
+              enableNetworkDomain(debuggee, () => {
+                console.log("📡 Network domain enabled (may have failed silently)");
               });
               chrome.debugger.sendCommand(debuggee, "Network.setCacheDisabled", { cacheDisabled: true }, () => {
                 console.log("🧩 Network cache disabled");
@@ -2019,10 +2402,7 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
             debuggerAttached = true;
             
             try {
-              chrome.debugger.sendCommand(debuggee, "Network.enable", {
-                maxTotalBufferSize: 100_000_000,
-                maxResourceBufferSize: 50_000_000
-              });
+              enableNetworkDomain(debuggee);
               chrome.debugger.sendCommand(debuggee, "Network.setCacheDisabled", { cacheDisabled: true });
               chrome.debugger.sendCommand(debuggee, "Page.enable", {});
               // Also ensure sub-targets are auto-attached on successful attach
