@@ -56,6 +56,8 @@ export const HttpTableTab: React.FC<Props> = ({
   const [isMinimized, setIsMinimized] = useState(false);
 
   const filtered = rows.filter((r) => {
+    if (!filter) return true;
+
     const safeStringify = (obj: any) => {
       try {
         return JSON.stringify(obj || {});
@@ -97,6 +99,8 @@ export const HttpTableTab: React.FC<Props> = ({
 
   const groups: Record<GroupKey, GroupedRow> = {};
   const order: GroupKey[] = [];
+  // Group keys by start time, so duplicates are found without scanning every group
+  const groupsByStart = new Map<number, GroupKey[]>();
 
   filtered.forEach((r) => {
     if (groups[r.id]) return;
@@ -105,7 +109,7 @@ export const HttpTableTab: React.FC<Props> = ({
       ? r.responsePayload[0]?.tid
       : null;
 
-    const dupKey = order.find((key) => {
+    const dupKey = (groupsByStart.get(r.startTime) || []).find((key) => {
       const gr = groups[key];
       const existingTid = Array.isArray(gr.lastResponsePayload)
         ? gr.lastResponsePayload[0]?.tid
@@ -138,6 +142,9 @@ export const HttpTableTab: React.FC<Props> = ({
         hasMessages: r.hasMessages,
       };
       order.push(keyToUse);
+      const bucket = groupsByStart.get(r.startTime);
+      if (bucket) bucket.push(keyToUse);
+      else groupsByStart.set(r.startTime, [keyToUse]);
     }
 
     // Always add Request action - even if no payload, show method info
@@ -432,11 +439,13 @@ export const HttpTableTab: React.FC<Props> = ({
         </thead>
         <tbody>
           {displayRows.map((gr, i) => {
-            const isSelected = selectedRowKey === `http-${i}`;
+            // Keyed by row id (not position) so the selection stays on the same call when rows are added
+            const rowKey = `http-${gr.id ?? i}`;
+            const isSelected = selectedRowKey === rowKey;
             return (
             <tr
               key={gr.id || i}
-              data-row-key={`http-${i}`}
+              data-row-key={rowKey}
               className={`transition-colors duration-200 cursor-pointer har-table-row ${
                 isSelected ? "har-row-selected" : ""
               } ${
@@ -455,7 +464,7 @@ export const HttpTableTab: React.FC<Props> = ({
               onClick={() => {
                 const isHttpLike = gr.patternType === 'http' || gr.patternType === 'generic';
                 onView(
-                  `http-${i}`,
+                  rowKey,
                   isHttpLike ? gr.endpoint || gr.method : gr.method,
                   {
                     _rowType: 'http',

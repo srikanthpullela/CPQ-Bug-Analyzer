@@ -81,8 +81,10 @@ const HarMethodsTabPage: React.FC = () => {
   }
 
   const extractedKeys = useMemo(() => {
+    // Only needed by the history modal; walking every captured payload on each update is costly
+    if (!historyModalOpen) return [];
     return extractKeyCounts([...httpRows, ...wsRows]);
-  }, [httpRows, wsRows]);
+  }, [historyModalOpen, httpRows, wsRows]);
 
   const showHistory = () => {
     setHistoryTree(buildHistory(fieldName));
@@ -182,10 +184,14 @@ const HarMethodsTabPage: React.FC = () => {
   };
 
   const handleView = (rowKey: string, title: string, data: any) => {
-    const [type, indexStr] = rowKey.split("-");
+    // "http-<row id>" or "ws-<index>"
+    const sep = rowKey.indexOf("-");
+    if (sep === -1) return;
+    const type = rowKey.slice(0, sep);
+    const ref = rowKey.slice(sep + 1);
     if (type !== "http" && type !== "ws") return;
-    const index = parseInt(indexStr, 10);
-    if (isNaN(index)) return;
+    if (!ref) return;
+    if (type === "ws" && isNaN(parseInt(ref, 10))) return;
     openPanel(title, data);
     setSelectedRowKey(rowKey);
   };
@@ -237,8 +243,6 @@ const HarMethodsTabPage: React.FC = () => {
   };
 
   const filterFunction = createFilterFunction(searchTerm);
-  const filteredHttpCount = httpRows.filter(filterFunction).length;
-  const filteredWsCount = wsRows.filter(filterFunction).length;
 
   // Arrow-key navigation: move selection up/down between filtered rows and
   // load the corresponding data into the detail panel.
@@ -250,6 +254,8 @@ const HarMethodsTabPage: React.FC = () => {
     () => wsRows.filter(filterFunction),
     [wsRows, searchTerm]
   );
+  const filteredHttpCount = filteredHttpRows.length;
+  const filteredWsCount = filteredWsRows.length;
 
   useEffect(() => {
     if (!panelOpen || !selectedRowKey) return;
@@ -267,12 +273,20 @@ const HarMethodsTabPage: React.FC = () => {
         return;
       }
 
-      const [type, indexStr] = selectedRowKey.split("-");
-      const index = parseInt(indexStr, 10);
-      if (isNaN(index)) return;
+      const sep = selectedRowKey.indexOf("-");
+      if (sep === -1) return;
+      const type = selectedRowKey.slice(0, sep);
+      const ref = selectedRowKey.slice(sep + 1);
 
       const list = type === "http" ? filteredHttpRows : filteredWsRows;
       if (list.length === 0) return;
+
+      // HTTP rows are selected by row id (rows can be inserted anywhere), WS rows by position
+      const index =
+        type === "http"
+          ? filteredHttpRows.findIndex((r) => r.id === ref)
+          : parseInt(ref, 10);
+      if (isNaN(index) || index < 0) return;
 
       const delta = e.key === "ArrowDown" ? 1 : -1;
       const nextIndex = Math.max(0, Math.min(list.length - 1, index + delta));
@@ -286,7 +300,7 @@ const HarMethodsTabPage: React.FC = () => {
         const r: any = nextRow;
         const isHttpLike = r.patternType === "http" || r.patternType === "generic";
         const title = isHttpLike ? r.endpoint || r.method : r.method;
-        handleView(`http-${nextIndex}`, title, {
+        handleView(`http-${r.id}`, title, {
           _rowType: "http",
           method: r.method,
           time: r.time,

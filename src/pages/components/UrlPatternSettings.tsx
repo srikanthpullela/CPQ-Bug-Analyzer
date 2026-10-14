@@ -21,6 +21,12 @@ export const UrlPatternSettings: React.FC<Props> = ({ isDarkMode = false, onClos
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
 
+  // Re-applies the saved patterns to the calls already in the table (rows that no longer match
+  // are removed, matching calls from the network log are added). Other rows are left as they are.
+  const requestResync = () => {
+    window.postMessage({ source: "HAR_EXTRACTOR", type: "REQUEST_HAR_RELOAD" }, "*");
+  };
+
   // Default patterns fallback
   const getDefaultPatterns = (): UrlPattern[] => [
     {
@@ -122,6 +128,7 @@ export const UrlPatternSettings: React.FC<Props> = ({ isDarkMode = false, onClos
         
         // Update our state to match exactly what was saved
         setPatterns(parsed);
+        requestResync();
         
         setIsSaving(false);
         toast.success(`✅ Patterns saved successfully! (${parsed.length} patterns)`);
@@ -152,6 +159,7 @@ export const UrlPatternSettings: React.FC<Props> = ({ isDarkMode = false, onClos
         localStorage.setItem('har_extractor_url_patterns', JSON.stringify(defaults));
         console.log('✅ Reset to defaults and saved to localStorage:', defaults);
         toast.success('✅ Patterns reset to defaults and saved!');
+        requestResync();
       } catch (error) {
         console.error('❌ Error saving defaults to localStorage:', error);
         toast.error('❌ Error resetting patterns');
@@ -168,6 +176,7 @@ export const UrlPatternSettings: React.FC<Props> = ({ isDarkMode = false, onClos
         localStorage.removeItem('har_extractor_url_patterns');
         console.log('✅ Cleared all patterns from localStorage');
         toast.success('✅ All patterns cleared!');
+        requestResync();
       } catch (error) {
         console.error('❌ Error clearing localStorage:', error);
         toast.error('❌ Error clearing patterns');

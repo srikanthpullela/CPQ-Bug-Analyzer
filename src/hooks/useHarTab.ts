@@ -10,52 +10,6 @@ function formatDuration(ms: number): string {
   return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
 }
 
-// Declare chrome API for TypeScript
-declare const chrome: any;
-
-function extractEndpointFromUrl(url: string): string {
-  try {
-    const urlObj = new URL(url);
-    let pathname = urlObj.pathname;
-    
-    // Remove leading slash
-    if (pathname.startsWith('/')) {
-      pathname = pathname.substring(1);
-    }
-    
-    // For API-style URLs, show the relevant path
-    if (pathname.includes('api/')) {
-      // Find the API part and show everything after it
-      const apiIndex = pathname.indexOf('api/');
-      const apiPath = pathname.substring(apiIndex + 4); // Skip 'api/'
-      
-      // Only add query parameters if they contain meaningful data (not just IDs or tokens)
-      if (urlObj.search && urlObj.search !== '?' && urlObj.search.length > 15 && 
-          !urlObj.search.includes('token=') && !urlObj.search.includes('id=') && 
-          !urlObj.search.includes('sessionId=')) {
-        return `${apiPath}${urlObj.search}`;
-      }
-      
-      return apiPath;
-    }
-    
-    // For other URLs, show the clean path
-    if (pathname.length > 0) {
-      // Only include query params if they seem to contain actual endpoint data
-      if (urlObj.search && urlObj.search !== '?' && urlObj.search.length > 20 && 
-          urlObj.search.includes('=') && !urlObj.search.includes('token=') && 
-          !urlObj.search.includes('sessionId=') && !urlObj.search.includes('timestamp=')) {
-        return `${pathname}${urlObj.search}`;
-      }
-      return pathname;
-    }
-    
-    return 'endpoint';
-  } catch {
-    return 'endpoint';
-  }
-}
-
 export interface HttpRow {
   method: string;
   requestPayload: any;
@@ -79,6 +33,10 @@ export interface HttpRow {
   requestHeaders?: any[];
   responseHeaders?: any[];
   url?: string;
+  // Identity of the captured call (set by devtools) so updates replace the row instead of adding one
+  key?: string;
+  // 'orf' = live capture when the call finished, 'har' = backfilled from the DevTools network log
+  source?: 'orf' | 'har';
 }
 
 export interface WsRow {
@@ -90,6 +48,28 @@ export interface WsRow {
   timestamp: number; // <-- Needed for proper sorting
   direction: "sent" | "received";
   duration?: string; // e.g. "20s", "1m 5s" — only on received rows
+}
+
+// Adds an HTTP row, or updates the row of the same call (same key) in place, keeping its id.
+// Rows stay ordered by start time.
+function upsertHttpRow(prev: HttpRow[], row: HttpRow): HttpRow[] {
+  if (row.key) {
+    const idx = prev.findIndex((r) => r.key === row.key);
+    if (idx !== -1) {
+      const existing = prev[idx];
+      // The live capture of a call is never replaced by its network-log backfill copy
+      if (row.source === 'har' && existing.source === 'orf') return prev;
+      const next = prev.slice();
+      next[idx] = { ...row, id: existing.id };
+      return next;
+    }
+  }
+  let i = prev.length;
+  while (i > 0 && prev[i - 1].startTime > row.startTime) i--;
+  if (i === prev.length) return [...prev, row];
+  const next = prev.slice();
+  next.splice(i, 0, row);
+  return next;
 }
 
 export function useLiveHar() {
@@ -112,10 +92,10 @@ export function useLiveHar() {
     
     console.log("[useLiveHar] Attaching message listener for HAR_RETRIGGER");
     
-    const onMessage = (event: MessageEvent) => {
-      if (event.data?.source !== "HAR_EXTRACTOR") return;
+    const processMessage = (data: any) => {
+      if (data?.source !== "HAR_EXTRACTOR") return;
 
-      const { type, payload } = event.data;
+      const { type, payload } = data;
       
       console.log("[useLiveHar] Received message type:", type);
 
@@ -209,35 +189,63 @@ export function useLiveHar() {
             // Add error detection for initial HTTP requests
             const hasMessages = payload.status && (payload.status >= 400);
             
-            setHttpRows((prev) => [
-              ...prev,
-              {
-                method: payload.method,
-                requestPayload: payload.requestPayload || { _noData: true, _method: payload.method },
-                responsePayload: payload.responsePayload || { _noData: true, _status: payload.status },
-                status: payload.status ?? null,
-                time,
-                startTime,
-                endTime,
-                id: uuidv4(),
-                urlPattern: payload.urlPattern,
-                patternType: payload.patternType,
-                httpMethod: payload.httpMethod,
-                endpoint: payload.endpoint,
-                displayName: payload.displayName,
-                hasMessages,
-                // Always include header data
-                requestHeaders: payload.requestHeaders || [],
-                responseHeaders: payload.responseHeaders || [],
-                headers: {
-                  request: payload.requestHeaders || [],
-                  response: payload.responseHeaders || []
-                },
-                url: payload.url || payload.baseUrl,
+            const row: HttpRow = {
+              method: payload.method,
+              requestPayload: payload.requestPayload || { _noData: true, _method: payload.method },
+              responsePayload: payload.responsePayload || { _noData: true, _status: payload.status },
+              status: payload.status ?? null,
+              time,
+              startTime,
+              endTime,
+              id: uuidv4(),
+              urlPattern: payload.urlPattern,
+              patternType: payload.patternType,
+              httpMethod: payload.httpMethod,
+              endpoint: payload.endpoint,
+              displayName: payload.displayName,
+              hasMessages,
+              // Always include header data
+              requestHeaders: payload.requestHeaders || [],
+              responseHeaders: payload.responseHeaders || [],
+              headers: {
+                request: payload.requestHeaders || [],
+                response: payload.responseHeaders || []
               },
-            ]);
+              url: payload.url || payload.baseUrl,
+              key: payload.rowKey,
+              source: payload.rowSource,
+            };
+            setHttpRows((prev) => upsertHttpRow(prev, row));
           }
           break;
+
+        case "HTTP_RESYNC": {
+          // URL patterns changed: drop rows that no longer match, relabel re-matched rows
+          const remove = new Set<string>(payload?.remove || []);
+          const restyle = new Map<string, any>(
+            (payload?.restyle || []).map((r: any) => [r.key, r.fields] as [string, any])
+          );
+          if (!remove.size && !restyle.size) break;
+          setHttpRows((prev) => {
+            let changed = false;
+            const next: HttpRow[] = [];
+            for (const r of prev) {
+              if (r.key && remove.has(r.key)) {
+                changed = true;
+                continue;
+              }
+              const fields = r.key ? restyle.get(r.key) : undefined;
+              if (fields) {
+                changed = true;
+                next.push({ ...r, ...fields });
+              } else {
+                next.push(r);
+              }
+            }
+            return changed ? next : prev;
+          });
+          break;
+        }
 
         case "APEXREMOTE":
           if (payload?.method) {
@@ -303,11 +311,12 @@ export function useLiveHar() {
               let duration: string | undefined = payload.duration;
               const taskId = payload.payload?.TaskId;
               if (taskId && direction === "received" && !duration) {
-                const sentRow = [...prev].reverse().find(
-                  (r) => r.direction === "sent" && r.payload?.TaskId === taskId
-                );
-                if (sentRow) {
-                  duration = formatDuration(tsMs - sentRow.timestamp);
+                for (let i = prev.length - 1; i >= 0; i--) {
+                  const r = prev[i];
+                  if (r.direction === "sent" && r.payload?.TaskId === taskId) {
+                    duration = formatDuration(tsMs - r.timestamp);
+                    break;
+                  }
                 }
               }
 
@@ -366,206 +375,18 @@ export function useLiveHar() {
           }
           break;
 
-        case "REQUEST_HAR_RELOAD":
-          if (!chrome?.devtools?.network?.getHAR) {
-            console.warn("chrome.devtools.network.getHAR is not available");
-            return;
-          }
-
-          chrome.devtools.network.getHAR((harLog: any) => {
-            // Get URL patterns from localStorage to filter dynamically
-            let urlPatterns: any[] = [];
-            try {
-              const stored = localStorage.getItem('har_extractor_url_patterns');
-              urlPatterns = stored ? JSON.parse(stored) : [];
-            } catch (error) {
-              console.warn('Error reading URL patterns:', error);
-              urlPatterns = [
-                { pattern: 'apexremote', enabled: true, type: 'apex', name: 'ApexRemote' },
-                { pattern: 'congacloud', enabled: true, type: 'http', name: 'CongaCloud' }
-              ];
-            }
-
-            // Use ALL enabled patterns from localStorage
-            const enabledPatterns = urlPatterns.filter(p => p.enabled);
-            
-            // Filter out static assets with comprehensive patterns
-            const staticAssetExtensions = [
-              '.js', '.css', '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', 
-              '.ttf', '.woff', '.woff2', '.eot', '.map', '.json', '.xml',
-              'favicon', '.webp', '.bmp', '.tiff', '.scss', '.less', '.ts.map',
-              '.min.js', '.min.css', '.chunk.js', '.bundle.js', '.vendor.js',
-              '.fonts', '.font', '.otf', '.woff2', '/assets/', '/static/',
-              'googletagmanager', 'google-analytics', 'analytics.js',
-              'gtag/js', 'doubleclick', 'googleadservices', 'facebook.net',
-              'hotjar', 'intercom', 'zendesk', '/images/', '/img/', '/icons/'
-            ];
-            
-            // Check if "Show All Calls" is enabled
-            let showAllCalls = false;
-            try {
-              showAllCalls = localStorage.getItem('har_show_all_calls') === 'true';
-            } catch {}
-            
-            const entries = (harLog.entries || []).filter((entry: any) => {
-              const url = entry.request.url.toLowerCase();
-              
-              // First check if it's a static asset
-              const isStaticAsset = staticAssetExtensions.some(ext => 
-                url.includes(ext.toLowerCase())
-              );
-              
-              if (isStaticAsset) {
-                return false;
-              }
-              
-              // If "Show All Calls" is enabled, include everything except static assets
-              if (showAllCalls) {
-                return true;
-              }
-              
-              // Then check if it matches any enabled pattern (case-insensitive and more flexible)
-              const matchesPattern = enabledPatterns.some(pattern => {
-                const patternLower = pattern.pattern.toLowerCase();
-                return url.includes(patternLower);
-              });
-              
-              return matchesPattern;
-            });
-
-            if (!entries.length) {
-              return;
-            }
-
-            const freshRows: HttpRow[] = [];
-            let completed = 0;
-            let failed = 0;
-
-            // Process entries with better error handling
-            const processEntry = (entry: any, index: number) => {
-              try {
-                const start = new Date(entry.startedDateTime);
-                const time = formatTime(start);
-                const startTime = start.getTime();
-                const totalTime = entry.time || 0;
-                const endTime = startTime + totalTime;
-
-                // Find which pattern matched this URL
-                const matchedPattern = enabledPatterns.find(p => 
-                  entry.request.url.toLowerCase().includes(p.pattern.toLowerCase())
-                );
-
-                let req = {};
-                try {
-                  req = JSON.parse(entry.request.postData?.text || "{}");
-                } catch (e) {
-                  console.debug(`[useLiveHar] Failed to parse request for entry ${index}:`, e);
-                }
-
-                // Use a timeout for getContent to avoid hanging
-                const timeoutId = setTimeout(() => {
-                  console.debug(`[useLiveHar] Timeout getting content for entry ${index}`);
-                  failed++;
-                  completed++;
-                  checkCompletion();
-                }, 5000);
-
-                entry.getContent((content: string) => {
-                  clearTimeout(timeoutId);
-                  
-                  let res = {};
-                  try {
-                    res = JSON.parse(content || "{}");
-                  } catch (e) {
-                    console.debug(`[useLiveHar] Failed to parse response for entry ${index}:`, e);
-                    // For non-JSON responses, store the raw content
-                    res = { _rawContent: content };
-                  }
-
-                  // Process based on pattern type
-                  let method, urlPattern, patternType, httpMethod, endpoint;
-                  const requestHttpMethod = entry.request.method || 'GET';
-                  
-                  if (matchedPattern) {
-                    urlPattern = matchedPattern.name || matchedPattern.pattern;
-                    patternType = matchedPattern.type || 'generic';
-                    httpMethod = requestHttpMethod;
-                    
-                    if (patternType === 'apex') {
-                      method = (req as any).method || "(unknown)";
-                    } else if (patternType === 'http') {
-                      endpoint = extractEndpointFromUrl(entry.request.url);
-                      method = endpoint;
-                    } else {
-                      // Generic: show just the path, Type column shows HTTP method
-                      endpoint = extractEndpointFromUrl(entry.request.url);
-                      const cleanPath = `/${endpoint}`.replace(/\/+/g, '/').replace(/\/$/, '') || '/';
-                      method = cleanPath;
-                    }
-                  } else {
-                    // No matched pattern: generic fallback
-                    endpoint = extractEndpointFromUrl(entry.request.url);
-                    const cleanPath = `/${endpoint}`.replace(/\/+/g, '/').replace(/\/$/, '') || '/';
-                    method = cleanPath;
-                    patternType = 'generic';
-                    httpMethod = requestHttpMethod;
-                  }
-
-                  // Detect errors based on status code when processing HAR entries
-                  const hasMessages = entry.response.status && (entry.response.status >= 400);
-
-                  freshRows.push({
-                    method,
-                    requestPayload: req,
-                    responsePayload: res,
-                    status: entry.response.status ?? null,
-                    time,
-                    startTime,
-                    endTime,
-                    id: uuidv4(),
-                    urlPattern,
-                    patternType: patternType as 'apex' | 'http' | 'generic',
-                    httpMethod,
-                    endpoint,
-                    hasMessages,
-                    // Always include header data for consistency
-                    requestHeaders: entry.request.headers || [],
-                    responseHeaders: entry.response?.headers || [],
-                    headers: {
-                      request: entry.request.headers || [],
-                      response: entry.response?.headers || []
-                    },
-                    url: entry.request.url,
-                  });
-
-                  completed++;
-                  checkCompletion();
-                });
-              } catch (error) {
-                console.error(`[useLiveHar] Error processing entry ${index}:`, error);
-                failed++;
-                completed++;
-                checkCompletion();
-              }
-            };
-
-            const checkCompletion = () => {
-              if (completed === entries.length) {
-                console.log(`[useLiveHar] Completed processing: ${freshRows.length} successful, ${failed} failed`);
-                // Sort by start time before setting
-                freshRows.sort((a, b) => a.startTime - b.startTime);
-                setHttpRows(freshRows);
-              }
-            };
-
-            // Process all entries
-            entries.forEach(processEntry);
-          });
-          break;
         default:
           break;
       }
     };
+
+    const onMessage = (event: MessageEvent) => processMessage(event.data);
+
+    // Take over from panel.tsx's early buffer: process what arrived before this listener existed
+    // (in order, exactly once), then listen directly.
+    const stopEarlyBuffer = (window as any).__CONGA_STOP_EARLY_BUFFER__;
+    const earlyMessages: any[] = typeof stopEarlyBuffer === "function" ? stopEarlyBuffer() || [] : [];
+    for (const msg of earlyMessages) processMessage(msg);
 
     // Attach listener
     window.addEventListener("message", onMessage);

@@ -130,12 +130,6 @@ export const NetworkTables: React.FC<NetworkTablesProps> = ({
   const filteredWsRows = wsRows.filter(filterFunction);
 
   const totalRequests = httpRows.length + wsRows.length;
-  const filteredHttpCount = httpRows.filter((row) =>
-    JSON.stringify(row).toLowerCase().includes(searchTerm.toLowerCase())
-  ).length;
-  const filteredWsCount = wsRows.filter((row) =>
-    JSON.stringify(row).toLowerCase().includes(searchTerm.toLowerCase())
-  ).length;
 
   if (totalRequests === 0) {
     return (

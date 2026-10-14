@@ -1,17 +1,33 @@
 // devtools.ts - Fully stable with WS reliability and panel re-entry safety + Configurable URL patterns
 
-const seenRequests = new Set<string>();
+// HTTP rows already sent to the panel, keyed by row key (see getHttpBaseKey).
+// Captured rows are kept until the user clears the table (or a URL-pattern change filters them out),
+// so page navigations and in-app route changes never wipe them.
+interface HttpRowState {
+  url: string;
+  pattern: UrlPattern;
+  apexMethod?: any;
+  // Row backfilled from getHAR(); the onRequestFinished data for the same request replaces it.
+  tentative: boolean;
+  // Bumped whenever the key is (re)claimed, so stale async getContent() results are dropped.
+  gen: number;
+}
+const httpRowState = new Map<string, HttpRowState>();
+let httpRowGen = 0;
+// Time of the user's last "Clear": calls/messages that finished before it are not added back.
+let logsClearedAt = 0;
+
+// Exact-duplicate guard for debugger WS frames
 const seenWsMessages = new Set<string>();
 // Track sent WS timestamps by TaskId for duration calculation
-const wsSentTimestamps: Record<string, number> = {};
+const wsSentTimestamps = new Map<string, number>();
 // Track WS connection URL per requestId so generic (non-Conga) messages can show it
 const wsUrlsByRequestId: Record<string, string> = {};
 // Latest WS connection URL seen (used as fallback for generic messages)
 let latestWsBaseUrl: string | null = null;
 let debuggerAttached = false;
-let wsFirstTimestamp: number | null = null;
-let wsFirstWallClock: number | null = null;
-let reloadTimeout: ReturnType<typeof setTimeout> | null = null;
+// Offset (ms) from CDP monotonic timestamps to wall-clock time, for debugger WS frames
+let wsMonoToWallOffsetMs: number | null = null;
 // Track most recent WS event to detect stalls
 let lastWsEventTime: number | null = null;
 // Declare chrome API for TypeScript
@@ -28,7 +44,6 @@ const attachedTargetIds = new Set<string>();
 // chrome.devtools.inspectedWindow.eval() to capture WS traffic without
 // needing the debugger API. Works regardless of other extensions.
 let wsPollingInterval: ReturnType<typeof setInterval> | null = null;
-let debuggerWsActive = false;
 let onNavigatedListenerAdded = false;
 let currentPanelWindow: any = null;
 let debuggerRetryInterval: ReturnType<typeof setInterval> | null = null;
@@ -43,6 +58,12 @@ const WS_INTERCEPTOR_SCRIPT = `
   if (window.__CONGA_WS_INTERCEPTOR__) return 'already_installed';
   window.__CONGA_WS_INTERCEPTOR__ = true;
   window.__CONGA_WS_QUEUE__ = [];
+  // Bounded queue: if nobody drains it (DevTools closed), keep only the newest messages.
+  function enqueue(item) {
+    var q = window.__CONGA_WS_QUEUE__;
+    q.push(item);
+    if (q.length > 5000) q.splice(0, q.length - 5000);
+  }
   var OrigWS = window.WebSocket;
   function CongaWebSocket(url, protocols) {
     var ws = protocols ? new OrigWS(url, protocols) : new OrigWS(url);
@@ -51,7 +72,7 @@ const WS_INTERCEPTOR_SCRIPT = `
     ws.send = function(data) {
       try {
         if (typeof data === 'string') {
-          window.__CONGA_WS_QUEUE__.push({ direction: 'sent', data: data, url: wsUrl, timestamp: Date.now() });
+          enqueue({ direction: 'sent', data: data, url: wsUrl, timestamp: Date.now() });
         }
       } catch(e) {}
       return origSend.call(ws, data);
@@ -59,13 +80,13 @@ const WS_INTERCEPTOR_SCRIPT = `
     ws.addEventListener('message', function(event) {
       try {
         if (typeof event.data === 'string') {
-          window.__CONGA_WS_QUEUE__.push({ direction: 'received', data: event.data, url: wsUrl, timestamp: Date.now() });
+          enqueue({ direction: 'received', data: event.data, url: wsUrl, timestamp: Date.now() });
         }
       } catch(e) {}
     });
     ws.addEventListener('open', function() {
       try {
-        window.__CONGA_WS_QUEUE__.push({ direction: 'open', data: '', url: wsUrl, timestamp: Date.now() });
+        enqueue({ direction: 'open', data: '', url: wsUrl, timestamp: Date.now() });
       } catch(e) {}
     });
     return ws;
@@ -91,16 +112,17 @@ function injectWsInterceptor() {
   });
 }
 
+// Drains the page interceptor queue. Runs continuously (also while the panel is hidden and
+// while the debugger is attached) — frames seen by both capture paths are de-duplicated in
+// handleWsFrame, so nothing piles up and gets dumped into the table later.
 function startWsPolling(panelWindow: any) {
   if (wsPollingInterval) clearInterval(wsPollingInterval);
   wsPollingInterval = setInterval(() => {
-    // If debugger is actively capturing WS events, skip interceptor processing
-    if (debuggerWsActive) return;
     chrome.devtools.inspectedWindow.eval(
       `(function() {
         if (!window.__CONGA_WS_QUEUE__ || window.__CONGA_WS_QUEUE__.length === 0) return null;
         var msgs = window.__CONGA_WS_QUEUE__.splice(0);
-        if (msgs.length > 5000) msgs = msgs.slice(-2000);
+        if (msgs.length > 5000) msgs = msgs.slice(-5000);
         return JSON.stringify(msgs);
       })()`,
       (result: any, isException: any) => {
@@ -181,39 +203,116 @@ function startDebuggerRetry(debuggee: any, panelWindow: any) {
   }, 10_000);
 }
 
-function processInterceptedWsMessage(msg: any, panelWindow: any) {
-  if (!panelWindow) return;
-  if (msg.direction === 'open') {
-    panelWindow.postMessage({ source: "HAR_EXTRACTOR", type: "WS_BASE_URL", payload: msg.url }, "*");
-    if (msg.url) latestWsBaseUrl = msg.url;
-    // Do NOT attach the debugger here — the interceptor captures WS messages
-    // on its own. Attaching the debugger shows Chrome's "debugging this browser"
-    // bar which annoys users who don't need it.
-    return;
+// Small, fast string hash (FNV-1a) used for HTTP row keys and WS de-duplication.
+function fnv1a(str: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
   }
-  if (msg.direction !== 'sent' && msg.direction !== 'received') return;
+  return (h >>> 0).toString(36);
+}
 
-  const rawPayload = msg.data;
-  if (!rawPayload) return;
+// ========================
+// WS FRAME HANDLING (shared by the debugger and the page interceptor)
+// ========================
+type WsSource = 'dbg' | 'int';
+
+// The same frame can be captured twice — once by chrome.debugger and once by the page
+// interceptor. Each frame is shown once; its copy from the other source is dropped.
+const wsRecentFrames = new Map<string, { src: WsSource; frameTime: number; seenAt: number }[]>();
+let wsRecentLastPrune = 0;
+const WS_MATCH_WINDOW_MS = 15_000;
+const WS_RECENT_TTL_MS = 5 * 60_000;
+
+function isWsCrossSourceDuplicate(src: WsSource, fp: string, frameTime: number): boolean {
+  const now = Date.now();
+  if (now - wsRecentLastPrune > 30_000) {
+    wsRecentLastPrune = now;
+    for (const [k, list] of wsRecentFrames) {
+      const kept = list.filter((e) => now - e.seenAt < WS_RECENT_TTL_MS);
+      if (kept.length) wsRecentFrames.set(k, kept);
+      else wsRecentFrames.delete(k);
+    }
+  }
+
+  const list = wsRecentFrames.get(fp) || [];
+  let best = -1;
+  let bestDiff = Infinity;
+  for (let i = 0; i < list.length; i++) {
+    const e = list[i];
+    if (e.src === src) continue;
+    const diff = Math.abs(e.frameTime - frameTime);
+    if (diff <= WS_MATCH_WINDOW_MS && diff < bestDiff) {
+      best = i;
+      bestDiff = diff;
+    }
+  }
+  if (best >= 0) {
+    list.splice(best, 1);
+    if (!list.length) wsRecentFrames.delete(fp);
+    return true;
+  }
+
+  list.push({ src, frameTime, seenAt: now });
+  if (list.length > 200) list.splice(0, list.length - 200);
+  wsRecentFrames.set(fp, list);
+  return false;
+}
+
+// Converts a CDP monotonic timestamp (seconds) of a debugger WS frame to wall-clock ms.
+function dbgMonoToWallMs(ts: any): number {
+  const now = Date.now();
+  if (typeof ts !== 'number' || !isFinite(ts)) return now;
+  let wall = wsMonoToWallOffsetMs !== null ? ts * 1000 + wsMonoToWallOffsetMs : NaN;
+  // Re-anchor when no offset is known yet or it is clearly stale (e.g. after system sleep).
+  if (!isFinite(wall) || wall > now + 2000 || wall < now - 10_000) {
+    wsMonoToWallOffsetMs = now - ts * 1000;
+    wall = now;
+  }
+  return Math.round(wall);
+}
+
+function formatWsDuration(diffMs: number): string | undefined {
+  // Ignore negative or absurdly large durations
+  if (!(diffMs >= 0 && diffMs < 3_600_000)) return undefined;
+  const totalSec = Math.round(diffMs / 1000);
+  if (totalSec < 60) return `${totalSec}s`;
+  const min = Math.floor(totalSec / 60);
+  const sec = totalSec % 60;
+  return sec > 0 ? `${min}m ${sec}s` : `${min}m`;
+}
+
+function handleWsFrame(
+  panelWindow: any,
+  src: WsSource,
+  direction: 'sent' | 'received',
+  rawPayload: any,
+  frameTime: number,
+  connUrl: string | null,
+  exactDupKey?: string
+) {
+  if (!panelWindow || !rawPayload) return;
+  // Frames from before the user's last "Clear" (e.g. still queued in the page) stay cleared.
+  if (frameTime < logsClearedAt) return;
+  const raw = String(rawPayload);
 
   let topLevel: any = {};
   let isRawMessage = false;
   try {
-    topLevel = JSON.parse(rawPayload);
+    topLevel = JSON.parse(raw);
   } catch {
-    const cleaned = String(rawPayload).replace(/^\uFEFF/, '').trim();
+    const cleaned = raw.replace(/^\uFEFF/, '').trim();
     try {
       topLevel = JSON.parse(cleaned);
     } catch {
-      // Non-JSON message — treat as generic raw WS payload.
       isRawMessage = true;
-      topLevel = { _raw: String(rawPayload).slice(0, 5000) };
     }
   }
-
-  if (wsFirstTimestamp === null) {
-    wsFirstTimestamp = msg.timestamp / 1000;
-    wsFirstWallClock = msg.timestamp;
+  if (isRawMessage || topLevel === null || typeof topLevel !== 'object') {
+    // Non-JSON (or primitive) message — treat as generic raw WS payload.
+    isRawMessage = true;
+    topLevel = { _raw: raw.slice(0, 5000) };
   }
 
   let nested: any = {};
@@ -222,7 +321,7 @@ function processInterceptedWsMessage(msg: any, panelWindow: any) {
       ? JSON.parse(topLevel.Payload) : topLevel.Payload;
   } catch {}
 
-  // Detect Conga envelope
+  // Detect Conga envelope: has EndPoint, TaskId, or Action at top level.
   const isCongaEnvelope = !isRawMessage && (
     topLevel.EndPoint !== undefined ||
     topLevel.TaskId !== undefined ||
@@ -231,58 +330,53 @@ function processInterceptedWsMessage(msg: any, panelWindow: any) {
   );
 
   const action = isCongaEnvelope
-    ? (nested?.Action || topLevel?.Action || "").toLowerCase()
-    : msg.direction;
+    ? String(nested?.Action || topLevel?.Action || "").toLowerCase()
+    : direction; // Generic WS: use direction as the "action" label
   if (isCongaEnvelope && action === "heartbeat") return;
 
-  const endpoint = isCongaEnvelope
-    ? (topLevel.EndPoint || (topLevel.TaskId ? `TaskId: ${topLevel.TaskId}` : "(unknown)"))
-    : (() => {
-        const connUrl = msg.url || latestWsBaseUrl;
-        if (connUrl) {
-          // Broadcast so the header shows the URL even on pre-existing connections
-          panelWindow.postMessage(
-            { source: "HAR_EXTRACTOR", type: "WS_BASE_URL", payload: connUrl },
-            "*"
-          );
-          try {
-            const u = new URL(connUrl);
-            return u.pathname || connUrl;
-          } catch { return connUrl; }
-        }
-        return "(message)";
-      })();
+  const fp = `${direction}|${fnv1a(raw.length > 8192 ? raw.slice(0, 8192) : raw)}`;
+  if (exactDupKey) {
+    const k = `${exactDupKey}|${fp}`;
+    if (seenWsMessages.has(k)) return;
+    if (seenWsMessages.size > 20_000) seenWsMessages.clear();
+    seenWsMessages.add(k);
+  }
+  if (isWsCrossSourceDuplicate(src, fp, frameTime)) return;
+
+  let endpoint: string;
+  if (isCongaEnvelope) {
+    endpoint = topLevel.EndPoint || (topLevel.TaskId ? `TaskId: ${topLevel.TaskId}` : "(unknown)");
+  } else if (connUrl) {
+    // Generic WS: show the connection URL path, and broadcast it so the
+    // connection header shows the URL even on pre-existing connections
+    panelWindow.postMessage({ source: "HAR_EXTRACTOR", type: "WS_BASE_URL", payload: connUrl }, "*");
+    try {
+      endpoint = new URL(connUrl).pathname || connUrl;
+    } catch {
+      endpoint = connUrl;
+    }
+  } else {
+    endpoint = "(message)";
+  }
   const status = isCongaEnvelope ? (topLevel.StatusCode ?? 200) : 200;
-  const timestamp = new Date(msg.timestamp);
 
-  const key = `int-${msg.timestamp}-${action}-${msg.direction}-${endpoint}`;
-  if (seenWsMessages.has(key)) return;
-  seenWsMessages.add(key);
-  if (seenWsMessages.size > 10000) seenWsMessages.clear();
-
-  // Calculate duration between sent and received using TaskId
-  const taskId = topLevel.TaskId;
+  // Duration between a sent message and its response, matched by TaskId (wall-clock ms on both sides)
   let duration: string | undefined;
-  if (taskId) {
-    if (msg.direction === 'sent') {
-      wsSentTimestamps[taskId] = msg.timestamp;
-    } else {
-      const sentTs = wsSentTimestamps[taskId];
-      if (sentTs) {
-        const diffMs = msg.timestamp - sentTs;
-        // Sanity check: ignore negative or absurdly large durations
-        // (can happen when sent/received come from different capture paths)
-        if (diffMs >= 0 && diffMs < 3600000) {
-          const totalSec = Math.round(diffMs / 1000);
-          if (totalSec < 60) {
-            duration = `${totalSec}s`;
-          } else {
-            const min = Math.floor(totalSec / 60);
-            const sec = totalSec % 60;
-            duration = sec > 0 ? `${min}m ${sec}s` : `${min}m`;
-          }
+  const taskId = topLevel.TaskId;
+  if (taskId !== undefined && taskId !== null && taskId !== '') {
+    const taskKey = String(taskId);
+    if (direction === 'sent') {
+      wsSentTimestamps.set(taskKey, frameTime);
+      if (wsSentTimestamps.size > 5000) {
+        const cutoff = Date.now() - 3_600_000;
+        for (const [k, t] of wsSentTimestamps) {
+          if (t < cutoff) wsSentTimestamps.delete(k);
         }
+        if (wsSentTimestamps.size > 5000) wsSentTimestamps.clear();
       }
+    } else {
+      const sentTs = wsSentTimestamps.get(taskKey);
+      if (sentTs !== undefined) duration = formatWsDuration(frameTime - sentTs);
     }
   }
 
@@ -294,12 +388,29 @@ function processInterceptedWsMessage(msg: any, panelWindow: any) {
       action,
       payload: topLevel,
       status,
-      direction: msg.direction,
-      timestamp: msg.timestamp,
-      time: timestamp.toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+      direction,
+      timestamp: frameTime,
+      time: new Date(frameTime).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
       duration,
     },
   }, "*");
+}
+
+function processInterceptedWsMessage(msg: any, panelWindow: any) {
+  if (!panelWindow || !msg) return;
+  if (msg.direction === 'open') {
+    // Do NOT attach the debugger here — the interceptor captures WS messages
+    // on its own. Attaching the debugger shows Chrome's "debugging this browser"
+    // bar which annoys users who don't need it.
+    if (msg.url) {
+      latestWsBaseUrl = msg.url;
+      panelWindow.postMessage({ source: "HAR_EXTRACTOR", type: "WS_BASE_URL", payload: msg.url }, "*");
+    }
+    return;
+  }
+  if (msg.direction !== 'sent' && msg.direction !== 'received') return;
+  const frameTime = typeof msg.timestamp === 'number' && isFinite(msg.timestamp) ? msg.timestamp : Date.now();
+  handleWsFrame(panelWindow, 'int', msg.direction, msg.data, frameTime, msg.url || latestWsBaseUrl);
 }
 
 // URL Pattern Configuration System
@@ -505,73 +616,118 @@ function extractEndpointFromUrl(url: string): string {
   }
 }
 
-function processRequestByPattern(request: any, reqJson: any, resJson: any, pattern: UrlPattern) {
-  const httpMethod = request.request.method || 'GET';
-  
-  // For OPTIONS or non-standard responses, show the full response object
-  const shouldShowFullResponse = httpMethod === 'OPTIONS' || 
-    (resJson && typeof resJson === 'object' && !resJson.hasOwnProperty('result') && 
-     !Array.isArray(resJson) && Object.keys(resJson).length > 0);
-
-  const basePayload = {
-    url: request.request.url,
-    requestPayload: reqJson,
-    responsePayload: shouldShowFullResponse ? resJson : resJson,
-    status: request.response?.status ?? null,
-    timestamp: new Date(request.startedDateTime).getTime(),
-    endTime: Date.now(),
-    urlPattern: pattern.name,
-    patternType: pattern.type,
-    httpMethod
-  };
-
+// Display fields of an HTTP row (name/endpoint/type columns) for the URL pattern that matched it.
+function formatHttpRowFields(url: string, reqJson: any, pattern: UrlPattern) {
+  const common = { urlPattern: pattern.name, patternType: pattern.type };
   switch (pattern.type) {
-    case 'apex':
-      return {
-        ...basePayload,
-        method: reqJson.method || "(unknown)",
-        displayName: `${pattern.name}: ${reqJson.method || "(unknown)"}`
-      };
-    
-    case 'http':
-      const endpoint = extractEndpointFromUrl(request.request.url);
-      return {
-        ...basePayload,
-        method: endpoint,
-        endpoint,
-        displayName: `${pattern.name}: ${endpoint}`
-      };
-    
+    case 'apex': {
+      const method = reqJson?.method || "(unknown)";
+      return { ...common, method, endpoint: undefined as string | undefined, displayName: `${pattern.name}: ${method}` };
+    }
+
+    case 'http': {
+      const endpoint = extractEndpointFromUrl(url);
+      return { ...common, method: endpoint, endpoint, displayName: `${pattern.name}: ${endpoint}` };
+    }
+
     case 'generic':
     default: {
       // Generic HTTP: show just the path — the Type column already shows the HTTP method.
-      const genericEndpoint = extractEndpointFromUrl(request.request.url);
+      const genericEndpoint = extractEndpointFromUrl(url);
       const cleanPath = `/${genericEndpoint}`.replace(/\/+/g, '/').replace(/\/$/, '') || '/';
-      return {
-        ...basePayload,
-        method: cleanPath,
-        endpoint: genericEndpoint,
-        displayName: cleanPath
-      };
+      return { ...common, method: cleanPath, endpoint: genericEndpoint, displayName: cleanPath };
     }
   }
 }
 
-// Add a variable to track when patterns change
-let lastPatternHash: string | null = null;
+function processRequestByPattern(request: any, reqJson: any, resJson: any, pattern: UrlPattern) {
+  return {
+    url: request.request.url,
+    requestPayload: reqJson,
+    responsePayload: resJson,
+    status: request.response?.status ?? null,
+    timestamp: new Date(request.startedDateTime).getTime(),
+    endTime: Date.now(),
+    httpMethod: request.request.method || 'GET',
+    ...formatHttpRowFields(request.request.url, reqJson, pattern),
+  };
+}
 
-function getPatternHash(patterns: UrlPattern[]): string {
-  return JSON.stringify(patterns.map(p => ({ name: p.name, pattern: p.pattern, enabled: p.enabled })));
+// Identity of a request that is the same in getHAR() and onRequestFinished (the HAR API exposes no
+// request id). Identical requests started in the same millisecond get an occurrence suffix (#n).
+function getHttpBaseKey(entry: any): string {
+  const req = entry?.request || {};
+  const body: string = req.postData?.text || '';
+  const sample = body.length > 65536 ? body.slice(0, 32768) + body.slice(-32768) : body;
+  return `${req.method || 'GET'} ${req.url} ${entry?.startedDateTime} ${body.length}:${fnv1a(sample)}`;
+}
+
+function parseHttpRequestBody(entry: any): any {
+  const request = entry?.request || {};
+  try {
+    return JSON.parse(request.postData?.text || "{}");
+  } catch {
+    // Non-JSON body: keep what's needed to show and resend the request
+    return {
+      _method: request.method,
+      _url: request.url,
+      _headers: request.headers || [],
+      _rawPostData: request.postData?.text || "",
+      _queryString: request.queryString || [],
+    };
+  }
+}
+
+function parseHttpResponseContent(entry: any, content: any): any {
+  if (typeof content === 'string' && content.trim()) {
+    try {
+      return JSON.parse(content);
+    } catch {
+      return { _rawContent: content };
+    }
+  }
+  // No body: for failed requests show why (e.g. net::ERR_FAILED), otherwise leave empty
+  const error = entry?.response?._error;
+  return error ? { _error: error } : {};
 }
 
 chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (panel: any) => {
   let currentTabId: number | null = null;
+  // The panel page's window. The panel page stays loaded while another DevTools tab is
+  // selected, so capturing keeps running (and posting into it) while the panel is hidden.
+  let panelWindow: any = null;
+  let panelInitialized = false;
+  let retriggerListener: ((message: any, sender: any, sendResponse: any) => void) | null = null;
+  let handlePanelMessageRef: ((event: any) => void) | null = null;
+  let sendInitialHarRef: (() => void) | null = null;
+  let attachDebuggerRef: (() => void) | null = null;
   // Track pending network requests for loading state
   let pendingNetworkRequests = new Set<string>();
   let loadingTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
+  // If the panel page itself gets reloaded it starts empty and loses our message listener:
+  // hook it up again and resend the HTTP calls that are still in the DevTools network log.
+  function ensurePanelHooked() {
+    try {
+      if (!panelWindow || panelWindow.__congaDebuggerHooked) return;
+      // Wait until the panel's early message buffer exists, so nothing posted to it is lost
+      if (typeof panelWindow.__CONGA_STOP_EARLY_BUFFER__ !== "function") return;
+      panelWindow.__congaDebuggerHooked = true;
+      if (handlePanelMessageRef) panelWindow.addEventListener("message", handlePanelMessageRef);
+      httpRowState.clear();
+      sendInitialHarRef?.();
+    } catch {}
+  }
+
+  // Hiding the panel does NOT stop capturing; only the resend listener and debugger retries stop.
+  panel.onHidden.addListener(() => {
+    if (retriggerListener) chrome.runtime.onMessage.removeListener(retriggerListener);
+    stopDebuggerRetry();
+  });
+
   // Helper to update loading state
   function updateLoadingState(panelWindow: any) {
+    if (!panelWindow) return;
     const isLoading = pendingNetworkRequests.size > 0;
     console.log(`📊 Loading state update: ${isLoading ? 'LOADING' : 'IDLE'} (${pendingNetworkRequests.size} pending requests)`);
     panelWindow.postMessage(
@@ -583,10 +739,12 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
     );
   }
 
-  panel.onShown.addListener((panelWindow: any) => {
+  panel.onShown.addListener((shownWindow: any) => {
     const tabId = chrome.devtools.inspectedWindow.tabId;
     currentTabId = tabId;
     const debuggee = { tabId };
+    panelWindow = shownWindow;
+    currentPanelWindow = shownWindow;
 
     // Clear any stale pending requests and ensure loading state is cleared on panel show
     pendingNetworkRequests.clear();
@@ -601,8 +759,8 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
     );
 
     // Add chrome.runtime.onMessage listener for HAR_RETRIGGER from React panel
-    // Make it tab-specific by checking currentTabId
-    const messageListener = (message: any, sender: any, sendResponse: any) => {
+    // Make it tab-specific by checking currentTabId (created once, re-added on every show)
+    const messageListener = retriggerListener || ((message: any, sender: any, sendResponse: any) => {
       // Only process messages for the current tab
       if (message.source === "HAR_EXTRACTOR" && message.type === "HAR_RETRIGGER") {
         // Check if this message is for the current tab by comparing message tab ID
@@ -733,19 +891,26 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
           }
         });
       }
-    };
-
-    // Add the listener
-    chrome.runtime.onMessage.addListener(messageListener);
-
-    // Clean up the listener when panel is hidden/closed
-    panel.onHidden.addListener(() => {
-      chrome.runtime.onMessage.removeListener(messageListener);
     });
+    retriggerListener = messageListener;
 
-    // Force a fresh read of patterns when panel is shown and set initial hash
-    const currentPatterns = getUrlPatternsFromStorage();
-    lastPatternHash = getPatternHash(currentPatterns);
+    // Add the listener (removed again when the panel is hidden)
+    if (!chrome.runtime.onMessage.hasListener(messageListener)) {
+      chrome.runtime.onMessage.addListener(messageListener);
+    }
+
+    if (panelInitialized) {
+      // Capturing is already wired up and kept running while the panel was hidden —
+      // just make sure every part of it is still alive. Nothing is cleared or reloaded.
+      if (handlePanelMessageRef) panelWindow.addEventListener("message", handlePanelMessageRef);
+      ensurePanelHooked();
+      attachDebuggerRef?.();
+      injectWsInterceptor();
+      if (!wsPollingInterval) startWsPolling(panelWindow);
+      return;
+    }
+    panelInitialized = true;
+    panelWindow.__congaDebuggerHooked = true;
 
     // ── Lazy debugger attach ──────────────────────────────────────────
     // The chrome.debugger API triggers a visible "started debugging this
@@ -845,27 +1010,28 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
         );
         try { startWsWatchdog(); } catch {}
       });
-
-      // Listen for debugger detach events
-      chrome.debugger.onDetach.addListener((detachedDebuggee: any, reason: string) => {
-        if (detachedDebuggee.tabId === currentTabId) {
-          console.log("🔌 Debugger detached:", reason);
-          debuggerAttached = false;
-          panelWindow.postMessage(
-            { source: "HAR_EXTRACTOR", type: "DEBUGGER_DISCONNECTED" },
-            "*"
-          );
-          debuggerWsActive = false;
-          injectWsInterceptor();
-          // Do NOT auto-retry — let the user manually reconnect from the WS table overlay.
-          // Auto-retry causes the annoying "debugging this browser" bar to reappear.
-          stopDebuggerRetry();
-        }
-      });
     }
+
+    // Listen for debugger detach events (e.g. the user closed the "debugging this browser" bar)
+    chrome.debugger.onDetach.addListener((detachedDebuggee: any, reason: string) => {
+      if (detachedDebuggee.tabId === currentTabId) {
+        console.log("🔌 Debugger detached:", reason);
+        debuggerAttached = false;
+        panelWindow?.postMessage(
+          { source: "HAR_EXTRACTOR", type: "DEBUGGER_DISCONNECTED" },
+          "*"
+        );
+        // The page interceptor keeps capturing WS traffic on its own
+        injectWsInterceptor();
+        // Do NOT auto-retry — let the user manually reconnect from the WS table overlay.
+        // Auto-retry causes the annoying "debugging this browser" bar to reappear.
+        stopDebuggerRetry();
+      }
+    });
 
     // Expose the lazy attach so the WS interceptor (module-scope) can trigger it
     lazyAttachDebuggerFn = attachDebuggerForWs;
+    attachDebuggerRef = attachDebuggerForWs;
 
     // Always rebind the listener safely
     chrome.debugger.onEvent.removeListener(handleEvent);
@@ -878,131 +1044,96 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
     // Chrome's network layer and captures frames on all connections.
     attachDebuggerForWs();
 
-    // WS Interceptor Fallback: always inject + poll so WS works even without debugger
-    currentPanelWindow = panelWindow;
-    debuggerWsActive = false;
+    // WS Interceptor Fallback: always inject + poll so WS works even without debugger.
+    // Frames captured by both the debugger and the interceptor are shown once (see handleWsFrame).
     injectWsInterceptor();
     startWsPolling(panelWindow);
 
-    // Re-inject WS interceptor on page navigation (works without debugger)
+    // Re-inject the WS interceptor after page navigations. Captured calls are NOT cleared on
+    // navigation (full reloads or in-app route changes) — they stay until the user clears them.
     if (!onNavigatedListenerAdded) {
       chrome.devtools.network.onNavigated.addListener((url: string) => {
-        console.log("🔄 onNavigated:", url, "- clearing tables and re-injecting WS interceptor");
-        debuggerWsActive = false;
-        wsFirstTimestamp = null;
-        wsFirstWallClock = null;
-        seenWsMessages.clear();
-        seenRequests.clear();
-        // Clear TaskId duration tracking from previous page
-        for (const key in wsSentTimestamps) {
-          delete wsSentTimestamps[key];
-        }
-
-        // Always clear tables on navigation — this fires for both
-        // debugger-attached and non-attached scenarios
-        if (currentPanelWindow) {
-          currentPanelWindow.postMessage(
-            { source: "HAR_EXTRACTOR", type: "CLEAR" },
-            "*"
-          );
-        }
-
+        console.log("🔄 onNavigated:", url, "- re-injecting WS interceptor (captured calls are kept)");
         // Re-inject interceptor after a short delay for page context to be ready
         setTimeout(() => injectWsInterceptor(), 100);
         // Double-inject after 500ms as safety net for slow-loading pages
         setTimeout(() => injectWsInterceptor(), 500);
         // Third inject at 1.5s for very slow pages
         setTimeout(() => injectWsInterceptor(), 1500);
-
-        // After navigation the debugger detaches. We do NOT eagerly re-attach
-        // here — the WS interceptor will trigger attachDebuggerForWs() lazily
-        // if/when WebSocket traffic is detected on the new page.
       });
       onNavigatedListenerAdded = true;
     }
 
+    // Re-hook the panel if its page gets reloaded while it is visible
+    setInterval(ensurePanelHooked, 1000);
+
     // ========================
-    // LIVE HTTP FALLBACK via onRequestFinished
+    // LIVE HTTP CAPTURE via onRequestFinished
     // ========================
     // This API works WITHOUT the chrome.debugger, providing live HTTP capture
-    // even when another extension blocks debugger attachment. It's the primary
-    // mechanism ensuring HTTP calls always show up regardless of conflicts.
+    // even when another extension blocks debugger attachment. Each matching call
+    // is added to the table (or updated in place, by row key) when it finishes —
+    // rows are never rebuilt, so clicks and navigations don't reset the table.
+    function postHttpRow(entry: any, req: any, key: string, gen: number, source: 'orf' | 'har', content: any) {
+      const st = httpRowState.get(key);
+      // Dropped when the row was cleared, filtered out or claimed again meanwhile
+      if (!st || st.gen !== gen || !panelWindow) return;
+      const url = entry.request.url;
+      const startTime = new Date(entry.startedDateTime).getTime();
+      const processedPayload = processRequestByPattern(
+        entry,
+        req,
+        parseHttpResponseContent(entry, content),
+        st.pattern
+      );
+
+      panelWindow.postMessage(
+        {
+          source: "HAR_EXTRACTOR",
+          type: "INITIAL_HTTP_REQUEST",
+          payload: {
+            ...processedPayload,
+            rowKey: key,
+            rowSource: source,
+            timestamp: startTime,
+            baseUrl: (() => { try { return new URL(url).origin; } catch { return ""; } })(),
+            endTime: startTime + (entry.time || 0),
+            hasMessages: (processedPayload.status || 0) >= 400,
+            isCompleted: true,
+            requestHeaders: entry.request.headers || [],
+            responseHeaders: entry.response?.headers || [],
+            headers: {
+              request: entry.request.headers || [],
+              response: entry.response?.headers || [],
+            },
+          },
+        },
+        "*"
+      );
+    }
+
     if (chrome.devtools?.network?.onRequestFinished) {
       chrome.devtools.network.onRequestFinished.addListener((request: any) => {
         const url = request.request?.url;
         if (!url) return;
+        // Finished before the user's last Clear
+        const startTime = new Date(request.startedDateTime).getTime();
+        if (startTime + (request.time || 0) < logsClearedAt) return;
 
         const matchedPattern = shouldProcessUrl(url);
         if (!matchedPattern) return;
 
-        // Deduplicate using request URL + start time
-        const rid = `orf-${url}-${request.startedDateTime}`;
-        if (seenRequests.has(rid)) return;
-        seenRequests.add(rid);
+        // Take over the row of this call if it was already backfilled from getHAR(),
+        // otherwise add a new row (#n tells identical calls apart).
+        const base = getHttpBaseKey(request);
+        let n = 0;
+        while (httpRowState.get(`${base}#${n}`)?.tentative === false) n++;
+        const key = `${base}#${n}`;
+        const req = parseHttpRequestBody(request);
+        const gen = ++httpRowGen;
+        httpRowState.set(key, { url, pattern: matchedPattern, apexMethod: req?.method, tentative: false, gen });
 
-        const timestamp = new Date(request.startedDateTime);
-        const startTime = timestamp.getTime();
-        const totalTimeMs = request.time || 0;
-        const endTime = startTime + totalTimeMs;
-
-        request.getContent((content: string) => {
-          let req: any = {};
-          let res: any = {};
-
-          try {
-            req = JSON.parse(request.request.postData?.text || "{}");
-          } catch {
-            req = {
-              _method: request.request.method,
-              _url: url,
-              _headers: request.request.headers || [],
-              _rawPostData: request.request.postData?.text || "",
-            };
-          }
-
-          if (content && content.trim()) {
-            try {
-              res = JSON.parse(content);
-            } catch {
-              res = { _rawContent: content };
-            }
-          } else {
-            res = { _empty: true, _status: request.response?.status };
-          }
-
-          const processedPayload = processRequestByPattern(
-            {
-              request: request.request,
-              response: request.response,
-              startedDateTime: request.startedDateTime,
-            },
-            req,
-            res,
-            matchedPattern
-          );
-
-          panelWindow.postMessage(
-            {
-              source: "HAR_EXTRACTOR",
-              type: "INITIAL_HTTP_REQUEST",
-              payload: {
-                ...processedPayload,
-                timestamp: startTime,
-                baseUrl: (() => { try { return new URL(url).origin; } catch { return ""; } })(),
-                endTime,
-                hasMessages: (request.response?.status || 0) >= 400,
-                isCompleted: true,
-                requestHeaders: request.request.headers || [],
-                responseHeaders: request.response?.headers || [],
-                headers: {
-                  request: request.request.headers || [],
-                  response: request.response?.headers || [],
-                },
-              },
-            },
-            "*"
-          );
-        });
+        request.getContent((content: string) => postHttpRow(request, req, key, gen, 'orf', content));
       });
       console.log("✅ onRequestFinished listener registered (works without debugger)");
     }
@@ -1099,6 +1230,11 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
       })();
       if (!isOurEvent) return;
 
+      // Keep the CDP monotonic-clock -> wall-clock offset fresh (used to time debugger WS frames)
+      if (typeof params?.wallTime === "number" && typeof params?.timestamp === "number") {
+        wsMonoToWallOffsetMs = params.wallTime * 1000 - params.timestamp * 1000;
+      }
+
       // Track network request start for loading indicator - ONLY for matching URLs
       if (method === "Network.requestWillBeSent") {
         const requestId = params?.requestId;
@@ -1140,26 +1276,7 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
         }
       }
 
-      // Auto-reload on request completion to fix status 0 issues
-      if (method === "Network.responseReceived" || method === "Network.loadingFinished") {
-        console.log(`📡 Network event: ${method} - scheduling reload to capture final status`);
-        scheduleHarReload();
-      }
-
-      // Clear tables on page navigation/reload
-      if (method === "Page.frameNavigated") {
-        // Only clear for main frame navigation (page reload/navigation)
-        if (params?.frame?.parentId === undefined) {
-          console.log("🔄 Page navigated - clearing all tables");
-          seenRequests.clear();
-          seenWsMessages.clear();
-          panelWindow.postMessage(
-            { source: "HAR_EXTRACTOR", type: "CLEAR" },
-            "*"
-          );
-        }
-        return;
-      }
+      // Note: page navigations (Page.frameNavigated) intentionally do NOT clear the tables.
 
       // Additional WS lifecycle diagnostics to understand connection state
       if (method === "Network.webSocketCreated") {
@@ -1219,7 +1336,6 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
       // Log WS errors explicitly
       if (method === "Network.webSocketFrameError") {
         console.log("❌ WebSocket frame error:", params);
-        scheduleHarReload();
         return;
       }
 
@@ -1229,8 +1345,6 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
       ) {
         // Mark last WS activity
         lastWsEventTime = Date.now();
-        // Debugger is capturing WS - disable interceptor processing
-        debuggerWsActive = true;
         
         // Enhanced logging for Windows Chrome WebSocket debugging
         if (navigator.userAgent.includes('Windows')) {
@@ -1265,170 +1379,22 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
           return;
         }
 
-        let topLevel: any = {};
-        let isRawMessage = false;
-        try {
-          // Try normal JSON parse
-          topLevel = JSON.parse(rawPayload);
-        } catch {
-          // Fallback: strip BOM/whitespace and retry
-          const cleaned = String(rawPayload).replace(/^\uFEFF/, '').trim();
-          try {
-            topLevel = JSON.parse(cleaned);
-          } catch {
-            // Non-JSON message — treat as generic raw WS payload.
-            isRawMessage = true;
-            topLevel = { _raw: String(rawPayload).slice(0, 5000) };
-          }
-        }
-
-        if (wsFirstTimestamp === null) {
-          wsFirstTimestamp = params.timestamp;
-          wsFirstWallClock = Date.now();
-          
-          if (navigator.userAgent.includes('Windows')) {
-            console.log("🔍 Windows Chrome: WebSocket timing initialized", {
-              wsFirstTimestamp,
-              wsFirstWallClock
-            });
-          }
-        }
-
-        let nested: any = {};
-        try {
-          nested =
-            typeof topLevel.Payload === "string" &&
-            topLevel.Payload.trim().startsWith("{")
-              ? JSON.parse(topLevel.Payload)
-              : topLevel.Payload;
-        } catch {
-          if (navigator.userAgent.includes('Windows')) {
-            console.log("🔍 Windows Chrome: Nested payload parsing failed, using top-level");
-          }
-        }
-
-        // Detect Conga envelope: has EndPoint, TaskId, or Action at top level.
-        const isCongaEnvelope = !isRawMessage && (
-          topLevel.EndPoint !== undefined ||
-          topLevel.TaskId !== undefined ||
-          topLevel.Action !== undefined ||
-          nested?.Action !== undefined
-        );
-
-        const action = isCongaEnvelope
-          ? (nested?.Action || topLevel?.Action || "").toLowerCase()
-          : direction; // Generic WS: use direction as the "action" label
-        if (isCongaEnvelope && action === "heartbeat") return;
-
-        const endpoint = isCongaEnvelope
-          ? (topLevel.EndPoint ||
-             (topLevel.TaskId ? `TaskId: ${topLevel.TaskId}` : "(unknown)"))
-          : (() => {
-              // Generic WS: show connection URL path
-              const connUrl = (params?.requestId && wsUrlsByRequestId[params.requestId]) || latestWsBaseUrl;
-              if (connUrl) {
-                // Also broadcast as WS_BASE_URL so the connection header shows it
-                panelWindow.postMessage(
-                  { source: "HAR_EXTRACTOR", type: "WS_BASE_URL", payload: connUrl },
-                  "*"
-                );
-                try {
-                  const u = new URL(connUrl);
-                  return u.pathname || connUrl;
-                } catch { return connUrl; }
-              }
-              return "(message)";
-            })();
-        const status = isCongaEnvelope ? (topLevel.StatusCode ?? 200) : 200;
-
-        const baseTime = Date.now() - performance.now();
-        const timestamp =
-          wsFirstTimestamp != null && wsFirstWallClock != null
-            ? new Date(
-                wsFirstWallClock + (params.timestamp - wsFirstTimestamp) * 1000
-              )
-            : new Date(baseTime + params.timestamp * 1000);
-
-        // Include requestId in dedupe key to avoid over-filtering on Windows
-        const requestIdForKey = params.requestId || params.requestID || 'no_request';
-        const key = `${requestIdForKey}-${timestamp.getTime()}-${action}-${direction}-${endpoint}`;
-        if (seenWsMessages.has(key)) {
-          if (navigator.userAgent.includes('Windows')) {
-            console.log(`🔍 Windows Chrome: Duplicate WS message filtered: ${key}`);
-          }
-          return;
-        }
-        seenWsMessages.add(key);
-        // Prevent unbounded growth
-        if (seenWsMessages.size > 10000) {
-          console.log("🧹 Trimming WS dedupe cache", seenWsMessages.size);
-          // Simple reset to avoid memory growth; safe due to timestamp-based keys
-          seenWsMessages.clear();
-        }
-
-        const wsPayload = {
-          endpoint,
-          action,
-          payload: topLevel,
-          status,
+        const reqId = params?.requestId;
+        handleWsFrame(
+          panelWindow,
+          'dbg',
           direction,
-          timestamp: timestamp.getTime(),
-          time: timestamp.toLocaleTimeString("en-GB", {
-            hour: "2-digit",
-            minute: "2-digit",
-            second: "2-digit",
-          }),
-          duration: undefined as string | undefined,
-        };
-
-        // Calculate duration between sent and received using TaskId
-        // Always use wall-clock epoch ms so both debugger and interceptor paths
-        // store comparable values in wsSentTimestamps.
-        const nowMs = Date.now();
-        const taskId = topLevel.TaskId;
-        if (taskId) {
-          if (direction === "sent") {
-            wsSentTimestamps[taskId] = nowMs;
-          } else {
-            const sentTs = wsSentTimestamps[taskId];
-            if (sentTs) {
-              const diffMs = nowMs - sentTs;
-              // Sanity check: ignore negative or absurdly large durations
-              if (diffMs >= 0 && diffMs < 3600000) {
-                const totalSec = Math.round(diffMs / 1000);
-                if (totalSec < 60) {
-                  wsPayload.duration = `${totalSec}s`;
-                } else {
-                  const min = Math.floor(totalSec / 60);
-                  const sec = totalSec % 60;
-                  wsPayload.duration = sec > 0 ? `${min}m ${sec}s` : `${min}m`;
-                }
-              }
-            }
-          }
-        }
-
-        panelWindow.postMessage(
-          {
-            source: "HAR_EXTRACTOR",
-            type: "WS",
-            payload: wsPayload,
-          },
-          "*"
+          rawPayload,
+          dbgMonoToWallMs(params?.timestamp),
+          (reqId && wsUrlsByRequestId[reqId]) || latestWsBaseUrl,
+          `${reqId}|${params?.timestamp}|${direction}`
         );
-        scheduleHarReload();
         return;
-      }
-
-      // Auto-reload on request completion to fix status 0 issues
-      if (method === "Network.responseReceived" || method === "Network.loadingFinished") {
-        console.log(`📡 Network event: ${method} - scheduling reload to capture final status`);
-        scheduleHarReload();
       }
     }
 
     // WS inactivity watchdog: if no frames within 5.5s after reconnect, re-enable domains
-    const startWsWatchdog = () => {
+    function startWsWatchdog() {
       // First check at 5.5s
       setTimeout(() => {
         if (!debuggerAttached) return; // Debugger was detached, skip
@@ -1471,215 +1437,64 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
           } catch {}
         }
       }, 12000);
-    };
-
-    // Debounced HAR reload notifier for the panel
-    function scheduleHarReload() {
-      if (reloadTimeout) clearTimeout(reloadTimeout);
-      reloadTimeout = setTimeout(() => {
-        panelWindow.postMessage(
-          { source: "HAR_EXTRACTOR", type: "REQUEST_HAR_RELOAD" },
-          "*"
-        );
-        reloadTimeout = null;
-      }, 100);
     }
 
-    // Enhanced auto-reload system to catch completed requests and fix status 0 issues
-    let periodicReloadInterval: ReturnType<typeof setInterval> | null = null;
-    let lastHarEntryCount = 0;
-    let lastCompletedCount = 0;
-    let pendingRequestIds = new Set<string>();
-
-    const startPeriodicReload = () => {
-      if (periodicReloadInterval) clearInterval(periodicReloadInterval);
-      periodicReloadInterval = setInterval(() => {
-        if (chrome?.devtools?.network?.getHAR) {
-          chrome.devtools.network.getHAR((harLog: any) => {
-            const currentEntryCount = harLog.entries?.length || 0;
-
-            // Count completed requests (non-zero status or finished)
-            let completedCount = 0;
-            let newPendingIds = new Set<string>();
-
-            harLog.entries?.forEach((entry: any) => {
-              const requestId = (entry as any).requestId || (entry as any)._requestId || entry.request.url;
-              const isCompleted = entry.response?.status && entry.response.status > 0;
-              const hasTimings = entry.timings && entry.timings.receive >= 0;
-              if (isCompleted || hasTimings) {
-                completedCount++;
-              } else {
-                newPendingIds.add(requestId);
-              }
-            });
-
-            const shouldReload =
-              currentEntryCount !== lastHarEntryCount ||
-              completedCount > lastCompletedCount ||
-              (pendingRequestIds.size > newPendingIds.size);
-
-            if (shouldReload) {
-              console.log(`🔄 Auto-reload triggered: entries ${lastHarEntryCount}->${currentEntryCount}, completed ${lastCompletedCount}->${completedCount}, pending ${pendingRequestIds.size}->${newPendingIds.size}`);
-              lastHarEntryCount = currentEntryCount;
-              lastCompletedCount = completedCount;
-              pendingRequestIds = newPendingIds;
-              panelWindow.postMessage(
-                { source: "HAR_EXTRACTOR", type: "REQUEST_HAR_RELOAD" },
-                "*"
-              );
-            }
-          });
-        }
-      }, 150);
-    };
-
-    const stopPeriodicReload = () => {
-      if (periodicReloadInterval) {
-        clearInterval(periodicReloadInterval);
-        periodicReloadInterval = null;
-      }
-    };
-
-    // Start periodic reload when panel is shown
-    startPeriodicReload();
-
-    // Clean up on panel hidden
-    panel.onHidden.addListener(() => {
-      stopPeriodicReload();
-      stopWsPolling();
-      stopDebuggerRetry();
-    });
-
+    // Backfills matching calls that are already in the DevTools network log (e.g. finished before
+    // the panel was opened, or newly matching after a URL-pattern change). Calls already in the
+    // table are skipped; calls still in flight are added by onRequestFinished once they finish.
     function sendInitialHar() {
       if (!chrome.devtools.network.getHAR) return;
 
       chrome.devtools.network.getHAR((harLog: any) => {
-        // Always get fresh patterns from localStorage for each reload
-        const currentPatterns = getUrlPatternsFromStorage();
-        const currentPatternHash = getPatternHash(currentPatterns);
-        
-        // If patterns have changed, we need to reprocess all requests
-        const patternsChanged = lastPatternHash !== null && lastPatternHash !== currentPatternHash;
-        
-        // Update the pattern hash
-        lastPatternHash = currentPatternHash;
-        
-        for (const entry of harLog.entries || []) {
-          const rid = (entry as any).requestId || (entry as any)._requestId;
-          
-          // If patterns haven't changed, skip already processed requests
-          if (!patternsChanged && seenRequests.has(rid)) {
-            continue;
-          }
+        const occurrences = new Map<string, number>();
+        for (const entry of harLog?.entries || []) {
+          const url = entry?.request?.url;
+          if (!url) continue;
+          // Still in flight
+          if (!entry.response?.status && !entry.response?._error) continue;
+          // Finished before the user's last Clear
+          const startTime = new Date(entry.startedDateTime).getTime();
+          if (startTime + (entry.time || 0) < logsClearedAt) continue;
 
-          // Use fresh patterns for each entry check
-          const matchedPattern = shouldProcessUrl(entry.request.url);
-          if (!matchedPattern) {
-            continue;
-          }
+          const matchedPattern = shouldProcessUrl(url);
+          if (!matchedPattern) continue;
 
-          // Mark as seen AFTER pattern matching to ensure reprocessing works
-          seenRequests.add(rid);
+          const base = getHttpBaseKey(entry);
+          const n = occurrences.get(base) || 0;
+          occurrences.set(base, n + 1);
+          const key = `${base}#${n}`;
+          if (httpRowState.has(key)) continue;
 
-          const timestamp = new Date(entry.startedDateTime);
-          const startTime = timestamp.getTime();
-          const totalTimeMs = entry.time || 0;
-          const endTime = startTime + totalTimeMs;
-
-          entry.getContent((content: any) => {
-            let req = {};
-            let res = {};
-            
-            // Enhanced request processing
-            try {
-              req = JSON.parse(entry.request.postData?.text || "{}");
-            } catch {
-              // Create a meaningful request object even if parsing fails
-              req = {
-                _method: entry.request.method,
-                _url: entry.request.url,
-                _headers: entry.request.headers || [],
-                _rawPostData: entry.request.postData?.text || '',
-                _queryString: entry.request.queryString || []
-              };
-            }
-
-            // Enhanced response processing to match live monitoring
-            if (content && content.trim()) {
-              try {
-                res = JSON.parse(content);
-              } catch {
-                res = { 
-                  _rawContent: content,
-                  _status: entry.response.status,
-                  _statusText: entry.response.statusText || '',
-                  _contentLength: content.length,
-                  _mimeType: entry.response.content?.mimeType || 'unknown'
-                };
-              }
-            } else {
-              // Create a meaningful response object even if no content
-              res = { 
-                _empty: true,
-                _status: entry.response.status,
-                _statusText: entry.response.statusText || '',
-                _headers: entry.response.headers || [],
-                _mimeType: entry.response.content?.mimeType || 'unknown',
-                _redirectURL: entry.response.redirectURL || ''
-              };
-            }
-
-            const processedPayload = processRequestByPattern(
-              { 
-                request: entry.request, 
-                response: entry.response,
-                startedDateTime: entry.startedDateTime
-              }, 
-              req, 
-              res, 
-              matchedPattern
-            );
-
-            // Enhanced error detection and status handling
-            const status = entry.response?.status || 0;
-            const hasMessages = status >= 400 || status === 0; // Include status 0 as potential issue
-            const isCompleted = status > 0 && entry.timings?.receive >= 0;
-
-            panelWindow.postMessage(
-              {
-                source: "HAR_EXTRACTOR",
-                type: "INITIAL_HTTP_REQUEST",
-                payload: {
-                  ...processedPayload,
-                  timestamp: startTime,
-                  baseUrl: new URL(entry.request.url).origin,
-                  endTime,
-                  hasMessages,
-                  isCompleted,
-                  // Always include header data for consistency
-                  requestHeaders: entry.request.headers || [],
-                  responseHeaders: entry.response?.headers || [],
-                  headers: {
-                    request: entry.request.headers || [],
-                    response: entry.response?.headers || []
-                  },
-                  // Add debug info for status issues
-                  _debug: {
-                    originalStatus: status,
-                    hasResponse: !!entry.response,
-                    hasTimings: !!entry.timings,
-                    receiveTime: entry.timings?.receive || -1,
-                    totalTime: entry.time || 0,
-                    entryComplete: isCompleted
-                  }
-                },
-              },
-              "*"
-            );
-            console.log(`📤 SENT INITIAL_HTTP_REQUEST for: ${processedPayload.method} (status: ${status}, completed: ${isCompleted}) at ${new Date(startTime).toLocaleTimeString()}`);
-          });
+          const req = parseHttpRequestBody(entry);
+          const gen = ++httpRowGen;
+          httpRowState.set(key, { url, pattern: matchedPattern, apexMethod: req?.method, tentative: true, gen });
+          entry.getContent((content: any) => postHttpRow(entry, req, key, gen, 'har', content));
         }
       });
+    }
+
+    // Re-applies the URL patterns to the captured rows after they changed: rows that no longer
+    // match are removed, re-matched rows are relabelled and newly matching calls are added.
+    function resyncHttpRows() {
+      const remove: string[] = [];
+      const restyle: { key: string; fields: any }[] = [];
+      for (const [key, st] of httpRowState) {
+        const p = shouldProcessUrl(st.url);
+        if (!p) {
+          httpRowState.delete(key);
+          remove.push(key);
+        } else if (p.name !== st.pattern.name || p.type !== st.pattern.type) {
+          st.pattern = p;
+          restyle.push({ key, fields: formatHttpRowFields(st.url, { method: st.apexMethod }, p) });
+        }
+      }
+      if (panelWindow && (remove.length || restyle.length)) {
+        panelWindow.postMessage(
+          { source: "HAR_EXTRACTOR", type: "HTTP_RESYNC", payload: { remove, restyle } },
+          "*"
+        );
+      }
+      sendInitialHar();
     }
 
     panelWindow.postMessage({ source: "HAR_EXTRACTOR", type: "INIT" }, "*");
@@ -1691,15 +1506,20 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
       console.log("🔌 DevTools received message:", event.data.type);
 
       if (event.data.type === "REQUEST_HAR_RELOAD") {
+        // Re-apply the URL patterns and add calls from the network log that aren't in the table
+        // yet. Rows already in the table are never rebuilt or dropped here.
         console.log("🔁 Panel requested HAR reload");
-        // Don't call sendInitialHar() here to avoid duplicates with live tracking
-        // The useHarTab.ts will handle HAR reload processing directly
+        resyncHttpRows();
       }
 
       if (event.data.type === "CLEAR_LOGS") {
         console.log("🧹 Panel requested CLEAR_LOGS");
-        seenRequests.clear();
+        // Calls/messages that finished before now stay cleared (also when backfilling from getHAR)
+        logsClearedAt = Date.now();
+        httpRowState.clear();
         seenWsMessages.clear();
+        wsRecentFrames.clear();
+        wsSentTimestamps.clear();
         // Clear loading state when logs are cleared
         pendingNetworkRequests.clear();
         if (loadingTimeoutId) {
@@ -1763,12 +1583,8 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
             // Verify the save was successful by reading it back immediately
             const verification = localStorage.getItem('har_extractor_url_patterns');
             if (verification) {
-              // Reset pattern tracking to force complete reprocessing
-              lastPatternHash = null;
-              seenRequests.clear();
-              
-              // Force a fresh reload of HAR data with new patterns
-              sendInitialHar();
+              // Re-apply the new patterns to the captured rows and add newly matching calls
+              resyncHttpRows();
               
               panelWindow.postMessage(
                 { 
@@ -1926,8 +1742,7 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
                 });
                 
                 // Reset WebSocket state variables
-                wsFirstTimestamp = null;
-                wsFirstWallClock = null;
+                wsMonoToWallOffsetMs = null;
                 seenWsMessages.clear();
                 
                 console.log("✅ Windows Chrome state cleanup completed");
@@ -2084,8 +1899,7 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
           });
         };
 
-        // Reset WS state and re-inject interceptor for fallback capture
-        debuggerWsActive = false;
+        // Re-inject interceptor for fallback capture while reconnecting
         injectWsInterceptor();
 
         // Always execute the force reconnection
@@ -2093,10 +1907,14 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
       }
     };
 
+    handlePanelMessageRef = handlePanelMessage;
+    sendInitialHarRef = sendInitialHar;
+
     // Listen on both panelWindow and window to ensure we catch all messages
     panelWindow.addEventListener("message", handlePanelMessage);
     window.addEventListener("message", handlePanelMessage);
 
+    // Backfill matching calls that finished before the panel was opened
     sendInitialHar();
   });
 });

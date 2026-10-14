@@ -48,6 +48,8 @@ export const WsTableTab: React.FC<Props> = ({
   const [isMinimized, setIsMinimized] = useState(false);
   // Enhanced filtering to include header data and all relevant fields
   const filtered = rows.filter((r) => {
+    if (!filter) return true;
+
     const safeStringify = (obj: any) => {
       try {
         return JSON.stringify(obj || {});
