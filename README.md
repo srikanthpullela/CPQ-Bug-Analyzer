@@ -722,10 +722,9 @@ This project is licensed under the MIT License. See LICENSE file for details.
 - **Safety Filters**: Built-in validation ensures only ApexRemote and CongaCloud patterns are active
 
 ### 🔄 **Robust WebSocket Monitoring**
-- **Hybrid Approach**: Attempts Chrome debugger attachment for full WS monitoring
-- **Graceful Fallback**: Falls back to network-based monitoring if user cancels debugger prompt
-- **Status Feedback**: Real-time status updates showing debugger attachment state
-- **Retry Mechanism**: One-click retry for debugger attachment with toast notifications
+- **Debugger attached up front**: When the panel opens, the extension attaches Chrome's debugger (Chrome shows its "Conga Debugger started debugging this browser" bar), so messages of every connection, including iframes and connections opened earlier, show up instantly
+- **Works without the debugger**: If Chrome refuses the debugger, WebSocket messages are still captured from the page and from the DevTools Network log
+- **Status Banner**: Shows Chrome's actual reason when the debugger can't attach or gets detached, with a one-click Retry
 - **Connection Display**: Clean formatting of WebSocket base URLs in table headers
 
 ### 📊 **Advanced Data Analysis**
@@ -773,9 +772,17 @@ This project is licensed under the MIT License. See LICENSE file for details.
 4. Use the interface to analyze requests, responses, and WebSocket communications
 
 ### WebSocket Monitoring
-- **Full Monitoring**: Allow debugger access when prompted for complete WebSocket data
-- **Fallback Mode**: If debugger access is denied, the extension automatically falls back to network-based monitoring
-- **Retry**: Use the retry button in the status bar to attempt debugger reattachment
+- **Full Monitoring**: When the panel opens, Chrome shows "Conga Debugger started debugging this browser". Keep that bar open; closing it detaches the debugger (click **Retry** in the panel to reattach)
+- **Without the debugger**: If Chrome refuses the debugger, a yellow banner shows Chrome's reason and WebSocket messages are still captured from the page and the DevTools Network log (iframe connections can show up a few seconds late)
+- **Retry**: Use the **Retry** button in the banner to attach the debugger again
+- **Connections opened before DevTools**: Like the Network tab, DevTools doesn't record what happened before it was opened; reload the page if a connection is missing
+
+### Page Reloads
+The tables follow the DevTools Network tab:
+- A page (re)load starts a fresh list with only the new page's calls
+- In-app route changes (single-page navigation) keep the rows
+- With **Preserve log** enabled in the Network tab, rows are kept across reloads
+- The 🗑️ button clears the tables at any time
 
 ### Customizing URL Patterns
 1. Click the "Settings" button in the header
@@ -795,7 +802,7 @@ This project is licensed under the MIT License. See LICENSE file for details.
 - **devtools.ts**: Main extension script handling Chrome APIs and message routing
 - **HarMethodsTabPage.tsx**: Primary UI component with state management
 - **useHarTab.ts**: Custom hook for live data capture and state synchronization
-- **DebuggerStatus.tsx**: Status component for WebSocket monitoring feedback
+- **NetworkTables.tsx**: HTTP and WebSocket tables, including the debugger status banner
 
 ### Data Flow
 1. **Network Capture**: Chrome DevTools API captures network requests
@@ -807,7 +814,7 @@ This project is licensed under the MIT License. See LICENSE file for details.
 ### Storage & Persistence
 - **URL Patterns**: Stored in localStorage with validation and fallback logic
 - **UI Preferences**: Dark mode and panel sizing preferences persist across sessions
-- **Session Data**: Network captures are session-scoped and reset on page reload
+- **Session Data**: Captured calls follow the DevTools Network log: a page reload starts a fresh list unless **Preserve log** is enabled in the Network tab
 
 ## Configuration
 
@@ -828,36 +835,23 @@ The extension comes with pre-configured patterns for:
 
 #### ❌ "Cannot access a chrome-extension:// URL of different extension"
 
-**Problem**: This error occurs when another Chrome extension is already using the debugger API.
+**Problem**: Chrome refuses to attach the debugger while another extension has a frame inside the page (for example a password manager, Salesforce Inspector, or a grammar/translation extension). The panel shows this error in a yellow banner. WebSocket messages are still captured without the debugger, so this only matters if messages are missing.
 
 **Solutions** (try in order):
-1. **Close conflicting extensions**:
-   - Disable other debugging/developer extensions temporarily
-   - Common conflicts: React DevTools, Redux DevTools, other network monitoring extensions
-   
-2. **Restart Chrome process**:
-   ```bash
-   # Close all Chrome windows and restart
-   # Or use Chrome Task Manager (Shift+Esc) to end Chrome processes
-   ```
-
-3. **Use a fresh Chrome profile**:
-   - Create a new Chrome profile specifically for development
-   - Install only essential extensions in the new profile
-
-4. **Check extension load order**:
-   - Load this extension first before other debugging tools
-   - Reload this extension if it was loaded after conflicting ones
+1. **Find the extension**: Disable extensions one at a time in `chrome://extensions/` and click **Retry** in the banner until it attaches
+2. **Limit it to other sites**: For that extension, open **Details → Site access** and choose **On click** or **On specific sites**, then reload the page and click **Retry**
+3. **Use a separate Chrome profile** with only the extensions needed for debugging
 
 #### ⚠️ Debugger Connection Issues
 
-**Symptoms**: "Reconnect WS" button appears, no network data captured
+**Symptoms**: A yellow "WebSocket debugger not attached" or "WebSocket debugger detached" banner in the panel
 
 **Solutions**:
-1. **Manual reconnection**: Click the "Reconnect WS" button in the header
-2. **Refresh target page**: Reload the page you're debugging
-3. **Restart DevTools**: Close and reopen Chrome DevTools
-4. **Extension reload**: Reload the extension in chrome://extensions/
+1. **Read the banner**: It shows Chrome's actual error and what usually causes it
+2. **Retry**: Click **Retry** in the banner (also needed after closing Chrome's "started debugging this browser" bar)
+3. **Policy**: If the banner mentions a policy, your organization blocks debugging that site; WebSocket messages are still captured without the debugger
+4. **Refresh target page**: Reload the page you're debugging
+5. **Restart DevTools**: Close and reopen Chrome DevTools
 
 #### 🚫 Permission Errors
 

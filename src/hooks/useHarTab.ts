@@ -40,6 +40,8 @@ export interface HttpRow {
 }
 
 export interface WsRow {
+  // Stable row identity: the selection stays on the row when earlier messages are inserted
+  id: string;
   endpoint: string;
   action: string;
   payload: any;
@@ -48,6 +50,73 @@ export interface WsRow {
   timestamp: number; // <-- Needed for proper sorting
   direction: "sent" | "received";
   duration?: string; // e.g. "20s", "1m 5s" — only on received rows
+}
+
+// chrome.debugger connection state reported by devtools.ts. When it isn't attached, WS messages
+// are read from the page interceptor and the DevTools network log instead.
+export interface DebuggerStatus {
+  state: "attached" | "unavailable" | "detached";
+  error?: string;
+  hint?: string;
+}
+
+function toWsRow(p: any, id: string): WsRow {
+  const tsMs = Number(p.timestamp) || Date.now();
+  return {
+    id,
+    endpoint: p.endpoint || "(unknown)",
+    action: p.action || "",
+    payload: p.payload,
+    status: p.status ?? null,
+    time: new Date(tsMs).toLocaleTimeString("en-GB", {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      timeZone: "Asia/Kolkata",
+    }),
+    timestamp: tsMs,
+    direction: p.direction || "received",
+    duration: p.duration,
+  };
+}
+
+// Adds WS rows in time order: messages read from the DevTools network log can arrive after later
+// live messages. A received message without a duration gets the time since the sent message with
+// the same TaskId.
+function mergeWsRows(prev: WsRow[], incoming: WsRow[]): WsRow[] {
+  if (!incoming.length) return prev;
+  const rows = incoming.length > 1 ? incoming.slice().sort((a, b) => a.timestamp - b.timestamp) : incoming;
+  const added: number[] = [];
+  let next: WsRow[];
+  if (!prev.length || rows[0].timestamp >= prev[prev.length - 1].timestamp) {
+    next = prev.concat(rows);
+    for (let k = prev.length; k < next.length; k++) added.push(k);
+  } else {
+    next = [];
+    let i = 0;
+    let j = 0;
+    while (i < prev.length || j < rows.length) {
+      if (j >= rows.length || (i < prev.length && prev[i].timestamp <= rows[j].timestamp)) {
+        next.push(prev[i++]);
+      } else {
+        added.push(next.length);
+        next.push(rows[j++]);
+      }
+    }
+  }
+  for (const k of added) {
+    const row = next[k];
+    const taskId = row.payload?.TaskId;
+    if (!taskId || row.direction !== "received" || row.duration) continue;
+    for (let m = k - 1; m >= 0 && m >= k - 5000; m--) {
+      const r = next[m];
+      if (r.direction === "sent" && r.payload?.TaskId === taskId) {
+        next[k] = { ...row, duration: formatDuration(row.timestamp - r.timestamp) };
+        break;
+      }
+    }
+  }
+  return next;
 }
 
 // Adds an HTTP row, or updates the row of the same call (same key) in place, keeping its id.
@@ -77,6 +146,7 @@ export function useLiveHar() {
   const [wsRows, setWsRows] = useState<WsRow[]>([]);
   const [wsBaseUrl, setWsBaseUrl] = useState<string>("");
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [debuggerStatus, setDebuggerStatus] = useState<DebuggerStatus | null>(null);
   let listenerAttached = false;
 
   const formatTime = (date: Date) => {
@@ -294,48 +364,45 @@ export function useLiveHar() {
 
         case "WS":
           try {
-            const direction = payload.direction || "received";
-            const endpoint = payload.endpoint || "(unknown)";
-            const action = payload.action || "";
-            const tsMs = Number(payload.timestamp) || Date.now();
-
-            const time = new Date(tsMs).toLocaleTimeString("en-GB", {
-              hour: "2-digit",
-              minute: "2-digit",
-              second: "2-digit",
-              timeZone: "Asia/Kolkata",
-            });
-
-            setWsRows((prev) => {
-              // Calculate duration for received messages by finding matching sent TaskId
-              let duration: string | undefined = payload.duration;
-              const taskId = payload.payload?.TaskId;
-              if (taskId && direction === "received" && !duration) {
-                for (let i = prev.length - 1; i >= 0; i--) {
-                  const r = prev[i];
-                  if (r.direction === "sent" && r.payload?.TaskId === taskId) {
-                    duration = formatDuration(tsMs - r.timestamp);
-                    break;
-                  }
-                }
-              }
-
-              return [
-                ...prev,
-                {
-                  endpoint,
-                  action,
-                  payload: payload.payload,
-                  status: payload.status ?? null,
-                  time,
-                  timestamp: tsMs,
-                  direction,
-                  duration,
-                },
-              ];
-            });
+            const row = toWsRow(payload, uuidv4());
+            setWsRows((prev) => mergeWsRows(prev, [row]));
           } catch (err) {
             console.warn("[useLiveHar] Failed to process WS row:", err);
+          }
+          break;
+
+        case "WS_BATCH":
+          try {
+            if (Array.isArray(payload) && payload.length) {
+              const rows = payload.map((p: any) => toWsRow(p, uuidv4()));
+              setWsRows((prev) => mergeWsRows(prev, rows));
+            }
+          } catch (err) {
+            console.warn("[useLiveHar] Failed to process WS rows:", err);
+          }
+          break;
+
+        case "PAGE_RESET": {
+          // The page was (re)loaded: like the DevTools Network tab, show only the new page's calls
+          const before = Number(payload?.before) || 0;
+          const removeKeys = new Set<string>(payload?.removeHttpKeys || []);
+          setWsRows((prev) => {
+            const next = prev.filter((r) => r.timestamp >= before);
+            return next.length === prev.length ? prev : next;
+          });
+          if (removeKeys.size) {
+            setHttpRows((prev) => {
+              const next = prev.filter((r) => !(r.key && removeKeys.has(r.key)));
+              return next.length === prev.length ? prev : next;
+            });
+          }
+          setWsBaseUrl("");
+          break;
+        }
+
+        case "DEBUGGER_STATUS":
+          if (payload && typeof payload.state === "string") {
+            setDebuggerStatus(payload as DebuggerStatus);
           }
           break;
         case "INITIAL_HAR":
@@ -400,5 +467,6 @@ export function useLiveHar() {
     wsRows,
     wsBaseUrl,
     isLoading,
+    debuggerStatus,
   };
 }

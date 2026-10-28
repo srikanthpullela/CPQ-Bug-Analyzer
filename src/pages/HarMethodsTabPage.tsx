@@ -23,7 +23,7 @@ import { useEditModal } from "../hooks/useEditModal";
 import { ClearLogsConfirmationModal } from "./components/ClearLogsConfirmationModal";
 
 const HarMethodsTabPage: React.FC = () => {
-  const { httpRows, wsRows, wsBaseUrl, isLoading } = useLiveHar();
+  const { httpRows, wsRows, wsBaseUrl, isLoading, debuggerStatus } = useLiveHar();
   const { buildHistory } = useFieldHistory(httpRows, wsRows);
   const [searchTerm, setSearchTerm] = useState("");
   const [panelOpen, setPanelOpen] = useState(false);
@@ -106,6 +106,9 @@ const HarMethodsTabPage: React.FC = () => {
       setSelectedRowKey(null);
       // Also clear rule matches when logs are cleared
       rulesHook.clearMatches();
+    } else if (type === "PAGE_RESET") {
+      // The page was (re)loaded and the previous page's calls were removed
+      rulesHook.clearMatches();
     }
   };
 
@@ -184,17 +187,30 @@ const HarMethodsTabPage: React.FC = () => {
   };
 
   const handleView = (rowKey: string, title: string, data: any) => {
-    // "http-<row id>" or "ws-<index>"
+    // "http-<row id>" or "ws-<row id>"
     const sep = rowKey.indexOf("-");
     if (sep === -1) return;
     const type = rowKey.slice(0, sep);
     const ref = rowKey.slice(sep + 1);
     if (type !== "http" && type !== "ws") return;
     if (!ref) return;
-    if (type === "ws" && isNaN(parseInt(ref, 10))) return;
     openPanel(title, data);
     setSelectedRowKey(rowKey);
   };
+
+  // Close the details when their row is removed (page reload, URL pattern change)
+  useEffect(() => {
+    if (!selectedRowKey) return;
+    const sep = selectedRowKey.indexOf("-");
+    const type = selectedRowKey.slice(0, sep);
+    const ref = selectedRowKey.slice(sep + 1);
+    const rows: any[] = type === "http" ? httpRows : type === "ws" ? wsRows : [];
+    if (rows.some((r) => r.id === ref)) return;
+    setPanelOpen(false);
+    setPanelData(null);
+    setPanelTitle("");
+    setSelectedRowKey(null);
+  }, [httpRows, wsRows, selectedRowKey]);
 
   const totalRequests = httpRows.length + wsRows.length;
   
@@ -230,7 +246,7 @@ const HarMethodsTabPage: React.FC = () => {
       if ('endpoint' in row) {
         const combined = `${row.time || ''} ${row.endpoint || ''} ${row.action || ''} ${safeStringify(
           row.payload
-        )} ${row.status || ''} ${row.direction || ''} ${row.id || ''} ${safeStringify(
+        )} ${row.status || ''} ${row.direction || ''} ${safeStringify(
           row.headers || {}
         )} ${safeStringify(row.connectionHeaders || [])} ${safeStringify(
           row.responseHeaders || [])}`;
@@ -281,12 +297,9 @@ const HarMethodsTabPage: React.FC = () => {
       const list = type === "http" ? filteredHttpRows : filteredWsRows;
       if (list.length === 0) return;
 
-      // HTTP rows are selected by row id (rows can be inserted anywhere), WS rows by position
-      const index =
-        type === "http"
-          ? filteredHttpRows.findIndex((r) => r.id === ref)
-          : parseInt(ref, 10);
-      if (isNaN(index) || index < 0) return;
+      // Rows are selected by row id (rows can be inserted anywhere)
+      const index = (list as any[]).findIndex((r) => r.id === ref);
+      if (index < 0) return;
 
       const delta = e.key === "ArrowDown" ? 1 : -1;
       const nextIndex = Math.max(0, Math.min(list.length - 1, index + delta));
@@ -319,7 +332,7 @@ const HarMethodsTabPage: React.FC = () => {
         });
       } else {
         const r: any = nextRow;
-        handleView(`ws-${nextIndex}`, r.endpoint || r.action || "WebSocket", {
+        handleView(`ws-${r.id}`, r.endpoint || r.action || "WebSocket", {
           _rowType: "ws",
           endpoint: r.endpoint,
           action: r.action,
@@ -414,6 +427,7 @@ const HarMethodsTabPage: React.FC = () => {
                   panelOpen={panelOpen}
                   autoScroll={autoScroll}
                   onToggleAutoScroll={() => setAutoScroll(!autoScroll)}
+                  debuggerStatus={debuggerStatus}
                 />
               </div>
             </div>

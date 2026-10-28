@@ -60,7 +60,7 @@ export const WsTableTab: React.FC<Props> = ({
 
     const combined = `${r.time || ''} ${r.endpoint || ''} ${r.action || ''} ${safeStringify(
       r.payload
-    )} ${r.status || ''} ${r.direction || ''} ${r.id || ''} ${safeStringify(
+    )} ${r.status || ''} ${r.direction || ''} ${safeStringify(
       r.headers || {}
     )} ${safeStringify(r.requestHeaders || [])} ${safeStringify(
       r.responseHeaders || []
@@ -260,12 +260,14 @@ export const WsTableTab: React.FC<Props> = ({
             }
 
             const rowColor = getWsRowColorClass(w);
-            const isSelected = selectedRowKey === `ws-${i}`;
+            // Rows are identified by id: earlier messages can be inserted above a selected row
+            const rowKey = `ws-${w.id ?? i}`;
+            const isSelected = selectedRowKey === rowKey;
 
             return (
               <tr
                 key={w.id || i}
-                data-row-key={`ws-${i}`}
+                data-row-key={rowKey}
                 className={`transition-colors duration-200 cursor-pointer har-table-row ${
                   isSelected ? "har-row-selected" : ""
                 } ${
@@ -283,7 +285,7 @@ export const WsTableTab: React.FC<Props> = ({
                 style={isSelected ? {} : {}}
                 onClick={() => {
                   onView(
-                    `ws-${i}`,
+                    rowKey,
                     w.action || w.endpoint || 'WebSocket',
                     {
                       _rowType: 'ws',

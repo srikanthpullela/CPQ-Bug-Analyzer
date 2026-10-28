@@ -1,8 +1,9 @@
 // devtools.ts - Fully stable with WS reliability and panel re-entry safety + Configurable URL patterns
 
 // HTTP rows already sent to the panel, keyed by row key (see getHttpBaseKey).
-// Captured rows are kept until the user clears the table (or a URL-pattern change filters them out),
-// so page navigations and in-app route changes never wipe them.
+// Like the DevTools Network tab, rows survive in-app route changes, a page (re)load that resets the
+// DevTools network log drops the previous page's rows (unless "Preserve log" is on there), and
+// Clear drops everything.
 interface HttpRowState {
   url: string;
   pattern: UrlPattern;
@@ -11,11 +12,20 @@ interface HttpRowState {
   tentative: boolean;
   // Bumped whenever the key is (re)claimed, so stale async getContent() results are dropped.
   gen: number;
+  // Request start (wall-clock ms) and identity in the DevTools network log (see getHarLooseId)
+  startTime: number;
+  looseId: string;
 }
 const httpRowState = new Map<string, HttpRowState>();
 let httpRowGen = 0;
 // Time of the user's last "Clear": calls/messages that finished before it are not added back.
 let logsClearedAt = 0;
+// Last page (re)load that reset the tables: start of its main request (ms) and its HAR page id.
+// Calls of the previous page that are still finishing are not added back.
+let pageResetAt = 0;
+let pageResetPageRef: string | null = null;
+// WS messages before this time (ms) belong to the previous page and are not added back.
+let wsResetCutoff = 0;
 
 // Exact-duplicate guard for debugger WS frames
 const seenWsMessages = new Set<string>();
@@ -25,6 +35,8 @@ const wsSentTimestamps = new Map<string, number>();
 const wsUrlsByRequestId: Record<string, string> = {};
 // Latest WS connection URL seen (used as fallback for generic messages)
 let latestWsBaseUrl: string | null = null;
+// Connection URL last posted to the panel (WS_BASE_URL), so it isn't re-posted for every message
+let postedWsBaseUrl: string | null = null;
 let debuggerAttached = false;
 // Offset (ms) from CDP monotonic timestamps to wall-clock time, for debugger WS frames
 let wsMonoToWallOffsetMs: number | null = null;
@@ -36,22 +48,32 @@ declare const chrome: any;
 // Track attached sub-targets (workers/iframes) to ensure WS events aren't filtered out
 const attachedTargetIds = new Set<string>();
 
+// chrome.debugger connection state, shown in the panel. WS capture also works without the debugger
+// (page interceptor + DevTools network log), but only the debugger delivers every frame instantly.
+interface DebuggerStatus {
+  state: 'attached' | 'unavailable' | 'detached';
+  error?: string;
+  hint?: string;
+}
+let debuggerStatus: DebuggerStatus | null = null;
+// The user closed Chrome's "started debugging this browser" bar: reattach only when they click Retry
+let debuggerCancelledByUser = false;
+// The last attach failed because another extension has a frame in the page
+let debuggerBlockedByExtensionFrame = false;
+
 // ========================
 // WS INTERCEPTOR FALLBACK
 // ========================
-// When chrome.debugger can't attach (e.g., another extension is using it),
-// this fallback injects a page-level WebSocket interceptor via
-// chrome.devtools.inspectedWindow.eval() to capture WS traffic without
-// needing the debugger API. Works regardless of other extensions.
+// Page-level WebSocket interceptor injected via chrome.devtools.inspectedWindow.eval(). It doesn't
+// need chrome.debugger, but only sees the top frame's sockets: new ones from the start, and ones
+// opened before injection from their next send() on. Sockets inside iframes (and messages from
+// before injection) are read from the DevTools network log (see processHarWebSockets).
 let wsPollingInterval: ReturnType<typeof setInterval> | null = null;
 let onNavigatedListenerAdded = false;
 let currentPanelWindow: any = null;
 let debuggerRetryInterval: ReturnType<typeof setInterval> | null = null;
-
-// Lazy debugger attach callback — set by the panel.onShown handler.
-// The WS interceptor calls this when it first detects WebSocket traffic,
-// so the debugger (and the "debugging" bar) only appears for WS users.
-let lazyAttachDebuggerFn: (() => void) | null = null;
+// Whether the Conga Debugger panel is the selected DevTools tab
+let panelVisible = false;
 
 const WS_INTERCEPTOR_SCRIPT = `
 (function() {
@@ -65,28 +87,40 @@ const WS_INTERCEPTOR_SCRIPT = `
     if (q.length > 5000) q.splice(0, q.length - 5000);
   }
   var OrigWS = window.WebSocket;
+  var proto = OrigWS.prototype;
+  var protoSend = proto.send;
+  // Listens to a socket's received messages (once per socket)
+  function hook(ws) {
+    try {
+      if (ws.__congaHooked) return;
+      Object.defineProperty(ws, '__congaHooked', { value: true });
+      ws.addEventListener('message', function(event) {
+        try {
+          if (typeof event.data === 'string') {
+            enqueue({ direction: 'received', data: event.data, url: ws.url, timestamp: Date.now() });
+          }
+        } catch(e) {}
+      });
+    } catch(e) {}
+  }
+  // Sockets opened before injection are picked up at their next send()
+  proto.send = function(data) {
+    try {
+      if (this instanceof OrigWS) {
+        hook(this);
+        if (typeof data === 'string') {
+          enqueue({ direction: 'sent', data: data, url: this.url, timestamp: Date.now() });
+        }
+      }
+    } catch(e) {}
+    return protoSend.apply(this, arguments);
+  };
   function CongaWebSocket(url, protocols) {
     var ws = protocols ? new OrigWS(url, protocols) : new OrigWS(url);
-    var wsUrl = url;
-    var origSend = ws.send;
-    ws.send = function(data) {
-      try {
-        if (typeof data === 'string') {
-          enqueue({ direction: 'sent', data: data, url: wsUrl, timestamp: Date.now() });
-        }
-      } catch(e) {}
-      return origSend.call(ws, data);
-    };
-    ws.addEventListener('message', function(event) {
-      try {
-        if (typeof event.data === 'string') {
-          enqueue({ direction: 'received', data: event.data, url: wsUrl, timestamp: Date.now() });
-        }
-      } catch(e) {}
-    });
+    hook(ws);
     ws.addEventListener('open', function() {
       try {
-        enqueue({ direction: 'open', data: '', url: wsUrl, timestamp: Date.now() });
+        enqueue({ direction: 'open', data: '', url: ws.url, timestamp: Date.now() });
       } catch(e) {}
     });
     return ws;
@@ -95,7 +129,7 @@ const WS_INTERCEPTOR_SCRIPT = `
   CongaWebSocket.OPEN = OrigWS.OPEN;
   CongaWebSocket.CLOSING = OrigWS.CLOSING;
   CongaWebSocket.CLOSED = OrigWS.CLOSED;
-  CongaWebSocket.prototype = OrigWS.prototype;
+  CongaWebSocket.prototype = proto;
   window.WebSocket = CongaWebSocket;
   return 'installed';
 })();
@@ -130,9 +164,12 @@ function startWsPolling(panelWindow: any) {
         try {
           const messages = JSON.parse(result);
           const pw = currentPanelWindow || panelWindow;
+          const rows: any[] = [];
           for (const msg of messages) {
-            processInterceptedWsMessage(msg, pw);
+            const row = processInterceptedWsMessage(msg, pw);
+            if (row) rows.push(row);
           }
+          postWsRows(pw, rows);
         } catch (e) {
           console.log("⚠️ Error processing interceptor WS messages:", e);
         }
@@ -155,51 +192,16 @@ function stopDebuggerRetry() {
   }
 }
 
-// Auto-retry debugger attachment when it fails or is detached by another extension
-function startDebuggerRetry(debuggee: any, panelWindow: any) {
-  stopDebuggerRetry();
+// Retries attaching the debugger every 10s while the panel is visible
+function startDebuggerRetry(attach: () => void) {
+  if (debuggerRetryInterval) return;
   console.log("🔄 Starting debugger auto-retry (every 10s)...");
   debuggerRetryInterval = setInterval(() => {
-    if (debuggerAttached) {
-      // Already attached, stop retrying
+    if (debuggerAttached || !panelVisible) {
       stopDebuggerRetry();
       return;
     }
-    console.log("🔄 Auto-retry: attempting debugger attach...");
-    try {
-      chrome.debugger.attach(debuggee, "1.3", () => {
-        if (chrome.runtime.lastError) {
-          console.log("🔄 Auto-retry: still blocked -", chrome.runtime.lastError.message);
-          return;
-        }
-        console.log("✅ Auto-retry: debugger attached successfully!");
-        debuggerAttached = true;
-        stopDebuggerRetry();
-
-        try {
-          chrome.debugger.sendCommand(debuggee, "Network.enable", {
-            maxTotalBufferSize: 100_000_000,
-            maxResourceBufferSize: 50_000_000,
-          });
-          chrome.debugger.sendCommand(debuggee, "Network.setCacheDisabled", { cacheDisabled: true });
-          chrome.debugger.sendCommand(debuggee, "Page.enable", {});
-          chrome.debugger.sendCommand(debuggee, "Target.setAutoAttach", {
-            autoAttach: true,
-            waitForDebuggerOnStart: false,
-            flatten: true,
-          });
-        } catch (e) {
-          console.log("⚠️ Auto-retry: error enabling domains:", (e as any)?.message || e);
-        }
-
-        panelWindow.postMessage(
-          { source: "HAR_EXTRACTOR", type: "DEBUGGER_RECONNECTED" },
-          "*"
-        );
-      });
-    } catch (e) {
-      console.log("🔄 Auto-retry: attach threw:", (e as any)?.message || e);
-    }
+    attach();
   }, 10_000);
 }
 
@@ -214,49 +216,80 @@ function fnv1a(str: string): string {
 }
 
 // ========================
-// WS FRAME HANDLING (shared by the debugger and the page interceptor)
+// WS FRAME HANDLING (shared by the debugger, the page interceptor and the DevTools network log)
 // ========================
-type WsSource = 'dbg' | 'int';
+type WsSource = 'dbg' | 'int' | 'har';
+const WS_SOURCE_BIT: Record<WsSource, number> = { dbg: 1, int: 2, har: 4 };
 
-// The same frame can be captured twice — once by chrome.debugger and once by the page
-// interceptor. Each frame is shown once; its copy from the other source is dropped.
-const wsRecentFrames = new Map<string, { src: WsSource; frameTime: number; seenAt: number }[]>();
+// The same frame can be reported by up to three sources. Each frame is shown once: a report is a
+// duplicate when another source already reported a frame with the same content and a close
+// timestamp (the mask records which sources reported each frame).
+const wsRecentFrames = new Map<string, { mask: number; frameTime: number; seenAt: number }[]>();
+let wsRecentCount = 0;
 let wsRecentLastPrune = 0;
 const WS_MATCH_WINDOW_MS = 15_000;
-const WS_RECENT_TTL_MS = 5 * 60_000;
+// Long enough for the network-log poll (at most ~60s apart) to catch up with the live sources
+const WS_RECENT_TTL_MS = 10 * 60_000;
+const WS_RECENT_MAX = 50_000;
+
+function pruneWsRecentFrames(keep: (e: { frameTime: number; seenAt: number }) => boolean) {
+  let count = 0;
+  for (const [k, list] of wsRecentFrames) {
+    const kept = list.filter(keep);
+    if (kept.length) {
+      wsRecentFrames.set(k, kept);
+      count += kept.length;
+    } else {
+      wsRecentFrames.delete(k);
+    }
+  }
+  wsRecentCount = count;
+}
+
+function clearWsRecentFrames() {
+  wsRecentFrames.clear();
+  wsRecentCount = 0;
+}
 
 function isWsCrossSourceDuplicate(src: WsSource, fp: string, frameTime: number): boolean {
   const now = Date.now();
-  if (now - wsRecentLastPrune > 30_000) {
+  if (now - wsRecentLastPrune > 30_000 || wsRecentCount > WS_RECENT_MAX) {
     wsRecentLastPrune = now;
-    for (const [k, list] of wsRecentFrames) {
-      const kept = list.filter((e) => now - e.seenAt < WS_RECENT_TTL_MS);
-      if (kept.length) wsRecentFrames.set(k, kept);
-      else wsRecentFrames.delete(k);
-    }
+    pruneWsRecentFrames((e) => now - e.seenAt < WS_RECENT_TTL_MS);
+    // Extremely chatty socket: keep only the last couple of minutes
+    if (wsRecentCount > WS_RECENT_MAX) pruneWsRecentFrames((e) => now - e.seenAt < WS_RECENT_TTL_MS / 5);
+    if (wsRecentCount > WS_RECENT_MAX) clearWsRecentFrames();
   }
 
-  const list = wsRecentFrames.get(fp) || [];
-  let best = -1;
-  let bestDiff = Infinity;
-  for (let i = 0; i < list.length; i++) {
-    const e = list[i];
-    if (e.src === src) continue;
-    const diff = Math.abs(e.frameTime - frameTime);
-    if (diff <= WS_MATCH_WINDOW_MS && diff < bestDiff) {
-      best = i;
-      bestDiff = diff;
+  const bit = WS_SOURCE_BIT[src];
+  let list = wsRecentFrames.get(fp);
+  if (list) {
+    let best: { mask: number } | null = null;
+    let bestDiff = Infinity;
+    for (const e of list) {
+      if (e.mask & bit) continue;
+      const diff = Math.abs(e.frameTime - frameTime);
+      if (diff <= WS_MATCH_WINDOW_MS && diff < bestDiff) {
+        best = e;
+        bestDiff = diff;
+      }
     }
-  }
-  if (best >= 0) {
-    list.splice(best, 1);
-    if (!list.length) wsRecentFrames.delete(fp);
-    return true;
+    if (best) {
+      best.mask |= bit;
+      return true;
+    }
+  } else {
+    list = [];
+    wsRecentFrames.set(fp, list);
   }
 
-  list.push({ src, frameTime, seenAt: now });
-  if (list.length > 200) list.splice(0, list.length - 200);
-  wsRecentFrames.set(fp, list);
+  list.push({ mask: bit, frameTime, seenAt: now });
+  wsRecentCount++;
+  // Enough for a socket repeating the same message several times a second between log polls
+  if (list.length > 1000) {
+    wsRecentCount -= list.length - 1000;
+    list.splice(0, list.length - 1000);
+  }
   return false;
 }
 
@@ -283,6 +316,23 @@ function formatWsDuration(diffMs: number): string | undefined {
   return sec > 0 ? `${min}m ${sec}s` : `${min}m`;
 }
 
+// Announces the WS connection URL shown in the panel's WebSocket header (only when it changes)
+function postWsBaseUrl(panelWindow: any, url: string | null | undefined) {
+  if (!panelWindow || !url || url === postedWsBaseUrl) return;
+  postedWsBaseUrl = url;
+  panelWindow.postMessage({ source: "HAR_EXTRACTOR", type: "WS_BASE_URL", payload: url }, "*");
+}
+
+function postWsRows(panelWindow: any, rows: any[]) {
+  if (!panelWindow || !rows.length) return;
+  if (rows.length === 1) {
+    panelWindow.postMessage({ source: "HAR_EXTRACTOR", type: "WS", payload: rows[0] }, "*");
+  } else {
+    panelWindow.postMessage({ source: "HAR_EXTRACTOR", type: "WS_BATCH", payload: rows }, "*");
+  }
+}
+
+// Turns a WS frame into a table row; null when the frame is filtered out or was already shown.
 function handleWsFrame(
   panelWindow: any,
   src: WsSource,
@@ -291,10 +341,10 @@ function handleWsFrame(
   frameTime: number,
   connUrl: string | null,
   exactDupKey?: string
-) {
-  if (!panelWindow || !rawPayload) return;
-  // Frames from before the user's last "Clear" (e.g. still queued in the page) stay cleared.
-  if (frameTime < logsClearedAt) return;
+): any | null {
+  if (!panelWindow || !rawPayload) return null;
+  // Frames from before the user's last "Clear" or the last page (re)load are not added back.
+  if (frameTime < Math.max(logsClearedAt, wsResetCutoff)) return null;
   const raw = String(rawPayload);
 
   let topLevel: any = {};
@@ -332,24 +382,24 @@ function handleWsFrame(
   const action = isCongaEnvelope
     ? String(nested?.Action || topLevel?.Action || "").toLowerCase()
     : direction; // Generic WS: use direction as the "action" label
-  if (isCongaEnvelope && action === "heartbeat") return;
+  if (isCongaEnvelope && action === "heartbeat") return null;
 
   const fp = `${direction}|${fnv1a(raw.length > 8192 ? raw.slice(0, 8192) : raw)}`;
   if (exactDupKey) {
     const k = `${exactDupKey}|${fp}`;
-    if (seenWsMessages.has(k)) return;
+    if (seenWsMessages.has(k)) return null;
     if (seenWsMessages.size > 20_000) seenWsMessages.clear();
     seenWsMessages.add(k);
   }
-  if (isWsCrossSourceDuplicate(src, fp, frameTime)) return;
+  if (isWsCrossSourceDuplicate(src, fp, frameTime)) return null;
 
   let endpoint: string;
   if (isCongaEnvelope) {
     endpoint = topLevel.EndPoint || (topLevel.TaskId ? `TaskId: ${topLevel.TaskId}` : "(unknown)");
   } else if (connUrl) {
-    // Generic WS: show the connection URL path, and broadcast it so the
+    // Generic WS: show the connection URL path, and announce it so the
     // connection header shows the URL even on pre-existing connections
-    panelWindow.postMessage({ source: "HAR_EXTRACTOR", type: "WS_BASE_URL", payload: connUrl }, "*");
+    postWsBaseUrl(panelWindow, connUrl);
     try {
       endpoint = new URL(connUrl).pathname || connUrl;
     } catch {
@@ -380,37 +430,185 @@ function handleWsFrame(
     }
   }
 
-  panelWindow.postMessage({
-    source: "HAR_EXTRACTOR",
-    type: "WS",
-    payload: {
-      endpoint,
-      action,
-      payload: topLevel,
-      status,
-      direction,
-      timestamp: frameTime,
-      time: new Date(frameTime).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
-      duration,
-    },
-  }, "*");
+  return {
+    endpoint,
+    action,
+    payload: topLevel,
+    status,
+    direction,
+    timestamp: frameTime,
+    time: new Date(frameTime).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit", second: "2-digit" }),
+    duration,
+  };
 }
 
-function processInterceptedWsMessage(msg: any, panelWindow: any) {
-  if (!panelWindow || !msg) return;
+function processInterceptedWsMessage(msg: any, panelWindow: any): any | null {
+  if (!panelWindow || !msg) return null;
   if (msg.direction === 'open') {
-    // Do NOT attach the debugger here — the interceptor captures WS messages
-    // on its own. Attaching the debugger shows Chrome's "debugging this browser"
-    // bar which annoys users who don't need it.
     if (msg.url) {
       latestWsBaseUrl = msg.url;
-      panelWindow.postMessage({ source: "HAR_EXTRACTOR", type: "WS_BASE_URL", payload: msg.url }, "*");
+      postWsBaseUrl(panelWindow, msg.url);
     }
+    return null;
+  }
+  if (msg.direction !== 'sent' && msg.direction !== 'received') return null;
+  const frameTime = typeof msg.timestamp === 'number' && isFinite(msg.timestamp) ? msg.timestamp : Date.now();
+  const row = handleWsFrame(panelWindow, 'int', msg.direction, msg.data, frameTime, msg.url || latestWsBaseUrl);
+  // Sockets opened before the interceptor was injected have no 'open' message
+  if (msg.url && !latestWsBaseUrl && frameTime >= Math.max(logsClearedAt, wsResetCutoff)) {
+    latestWsBaseUrl = msg.url;
+    postWsBaseUrl(panelWindow, msg.url);
+  }
+  return row;
+}
+
+// ========================
+// DEVTOOLS NETWORK LOG (chrome.devtools.network.getHAR)
+// ========================
+// The DevTools network log doesn't need chrome.debugger and has the WebSockets of every frame
+// (also iframes) with their messages, including sockets opened before the interceptor was injected.
+
+// Identity of a request in the DevTools network log, to tell whether a row is still listed there
+function getHarLooseId(entry: any): string {
+  return `${entry?.request?.method || 'GET'} ${entry?.request?.url} ${entry?.startedDateTime}`;
+}
+
+function getHarStartMs(entry: any): number {
+  return new Date(entry?.startedDateTime).getTime();
+}
+
+// getHAR() copies the whole log (every request and WS message), so only one call runs at a time.
+// Jobs queued meanwhile share the next call, which reflects the log as it is after they were queued.
+let harInFlight = false;
+const harQueue: ((har: any | null) => void)[] = [];
+let harRttMs = 300;
+// Highest DevTools page load id ("page_N", only grows) seen in a getHAR() result
+let maxPageIdSeen = -1;
+let harBaselineKnown = false;
+
+function getHarPageId(ref: any): number {
+  const m = /^page_(\d+)$/.exec(String(ref ?? ''));
+  return m ? Number(m[1]) : -1;
+}
+
+function noteHarPages(har: any) {
+  for (const p of har?.pages || []) maxPageIdSeen = Math.max(maxPageIdSeen, getHarPageId(p?.id));
+  harBaselineKnown = true;
+}
+
+function withHar(job: (har: any | null) => void) {
+  harQueue.push(job);
+  runHarQueue();
+}
+
+function runHarQueue() {
+  if (harInFlight || !harQueue.length) return;
+  const jobs = harQueue.splice(0);
+  const startedAt = Date.now();
+  let done = false;
+  let watchdog: ReturnType<typeof setTimeout> | null = null;
+  const finish = (har: any | null) => {
+    if (done) return;
+    done = true;
+    if (watchdog) clearTimeout(watchdog);
+    harInFlight = false;
+    harRttMs = Math.max(1, Date.now() - startedAt);
+    if (har) noteHarPages(har);
+    for (const job of jobs) {
+      try {
+        job(har);
+      } catch (e) {
+        console.log("⚠️ Error processing the DevTools network log:", e);
+      }
+    }
+    runHarQueue();
+  };
+  if (!chrome.devtools?.network?.getHAR) {
+    finish(null);
     return;
   }
-  if (msg.direction !== 'sent' && msg.direction !== 'received') return;
-  const frameTime = typeof msg.timestamp === 'number' && isFinite(msg.timestamp) ? msg.timestamp : Date.now();
-  handleWsFrame(panelWindow, 'int', msg.direction, msg.data, frameTime, msg.url || latestWsBaseUrl);
+  harInFlight = true;
+  // The callback isn't guaranteed to run
+  watchdog = setTimeout(() => finish(null), 30_000);
+  try {
+    chrome.devtools.network.getHAR((har: any) => finish(har || null));
+  } catch {
+    finish(null);
+  }
+}
+
+// Messages already processed per WebSocket in the network log (key: see getHarWsKey)
+const harWsProgress = new Map<string, number>();
+
+function getHarWsKey(entry: any): string {
+  return `${entry?.request?.url}|${entry?.startedDateTime}`;
+}
+
+// Adds the WS messages of the network log that the live capture didn't show (sockets in iframes or
+// opened before the interceptor was injected, or everything while chrome.debugger isn't attached).
+function processHarWebSockets(panelWindow: any, har: any, forceBaseUrl = false) {
+  if (!panelWindow || !har) return;
+  const inLog = new Set<string>();
+  const rows: any[] = [];
+  let newest: { url: string; start: number } | null = null;
+  let newestNew: { url: string; start: number } | null = null;
+
+  for (const entry of har.entries || []) {
+    const messages = entry?._webSocketMessages;
+    if (entry?._resourceType !== 'websocket' && !Array.isArray(messages)) continue;
+    const url: string | undefined = entry?.request?.url;
+    if (!url) continue;
+    const key = getHarWsKey(entry);
+    inLog.add(key);
+    const start = getHarStartMs(entry) || 0;
+    if (!newest || start >= newest.start) newest = { url, start };
+    if (!harWsProgress.has(key) && (!newestNew || start >= newestNew.start)) newestNew = { url, start };
+
+    const list: any[] = Array.isArray(messages) ? messages : [];
+    let done = harWsProgress.get(key) || 0;
+    if (done > list.length) done = 0;
+    for (let i = done; i < list.length; i++) {
+      const m = list[i];
+      if (!m || (m.type !== 'send' && m.type !== 'receive')) continue;
+      if (typeof m.time !== 'number' || !isFinite(m.time)) continue;
+      const row = handleWsFrame(panelWindow, 'har', m.type === 'send' ? 'sent' : 'received', m.data, Math.round(m.time * 1000), url);
+      if (row) rows.push(row);
+    }
+    harWsProgress.set(key, list.length);
+  }
+  for (const key of [...harWsProgress.keys()]) {
+    if (!inLog.has(key)) harWsProgress.delete(key);
+  }
+
+  const base = forceBaseUrl ? newest : newestNew;
+  if (base) {
+    latestWsBaseUrl = base.url;
+    postWsBaseUrl(panelWindow, base.url);
+  }
+  postWsRows(panelWindow, rows);
+}
+
+// Polls the network log for new WS messages: often while chrome.debugger isn't attached, rarely
+// while it is (then only sockets the debugger can't see add anything). Adapts to getHAR()'s cost.
+let harPollTimer: ReturnType<typeof setTimeout> | null = null;
+
+function scheduleHarPoll(delay?: number) {
+  if (harPollTimer) clearTimeout(harPollTimer);
+  if (delay === undefined) {
+    const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+    if (!debuggerAttached) {
+      delay = panelVisible ? clamp(10 * harRttMs, 1500, 15_000) : clamp(10 * harRttMs, 5000, 60_000);
+    } else {
+      delay = panelVisible ? clamp(20 * harRttMs, 15_000, 60_000) : 60_000;
+    }
+  }
+  harPollTimer = setTimeout(() => {
+    harPollTimer = null;
+    withHar((har) => {
+      processHarWebSockets(currentPanelWindow, har);
+      if (!harPollTimer) scheduleHarPoll();
+    });
+  }, delay);
 }
 
 // URL Pattern Configuration System
@@ -699,14 +897,28 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
   let panelInitialized = false;
   let retriggerListener: ((message: any, sender: any, sendResponse: any) => void) | null = null;
   let handlePanelMessageRef: ((event: any) => void) | null = null;
-  let sendInitialHarRef: (() => void) | null = null;
+  let refreshFromHarRef: (() => void) | null = null;
   let attachDebuggerRef: (() => void) | null = null;
   // Track pending network requests for loading state
   let pendingNetworkRequests = new Set<string>();
   let loadingTimeoutId: ReturnType<typeof setTimeout> | null = null;
 
+  function postDebuggerStatus() {
+    if (!panelWindow || !debuggerStatus) return;
+    panelWindow.postMessage({ source: "HAR_EXTRACTOR", type: "DEBUGGER_STATUS", payload: debuggerStatus }, "*");
+  }
+
+  // Posts the status when it changed (or when forced, so a Retry click always gets an answer)
+  function setDebuggerStatus(status: DebuggerStatus, force = false): boolean {
+    const prev = debuggerStatus;
+    debuggerStatus = status;
+    const changed = !prev || prev.state !== status.state || prev.error !== status.error || prev.hint !== status.hint;
+    if (changed || force) postDebuggerStatus();
+    return changed;
+  }
+
   // If the panel page itself gets reloaded it starts empty and loses our message listener:
-  // hook it up again and resend the HTTP calls that are still in the DevTools network log.
+  // hook it up again and resend everything that is still in the DevTools network log.
   function ensurePanelHooked() {
     try {
       if (!panelWindow || panelWindow.__congaDebuggerHooked) return;
@@ -715,12 +927,19 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
       panelWindow.__congaDebuggerHooked = true;
       if (handlePanelMessageRef) panelWindow.addEventListener("message", handlePanelMessageRef);
       httpRowState.clear();
-      sendInitialHarRef?.();
+      clearWsRecentFrames();
+      harWsProgress.clear();
+      wsSentTimestamps.clear();
+      latestWsBaseUrl = null;
+      postedWsBaseUrl = null;
+      postDebuggerStatus();
+      refreshFromHarRef?.();
     } catch {}
   }
 
   // Hiding the panel does NOT stop capturing; only the resend listener and debugger retries stop.
   panel.onHidden.addListener(() => {
+    panelVisible = false;
     if (retriggerListener) chrome.runtime.onMessage.removeListener(retriggerListener);
     stopDebuggerRetry();
   });
@@ -745,6 +964,7 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
     const debuggee = { tabId };
     panelWindow = shownWindow;
     currentPanelWindow = shownWindow;
+    panelVisible = true;
 
     // Clear any stale pending requests and ensure loading state is cleared on panel show
     pendingNetworkRequests.clear();
@@ -904,162 +1124,267 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
       // just make sure every part of it is still alive. Nothing is cleared or reloaded.
       if (handlePanelMessageRef) panelWindow.addEventListener("message", handlePanelMessageRef);
       ensurePanelHooked();
-      attachDebuggerRef?.();
+      if (!debuggerAttached && !debuggerCancelledByUser) attachDebuggerRef?.();
       injectWsInterceptor();
       if (!wsPollingInterval) startWsPolling(panelWindow);
+      scheduleHarPoll(0);
       return;
     }
     panelInitialized = true;
     panelWindow.__congaDebuggerHooked = true;
 
-    // ── Lazy debugger attach ──────────────────────────────────────────
-    // The chrome.debugger API triggers a visible "started debugging this
-    // browser" bar.  HTTP capture works fine via onRequestFinished (no
-    // debugger needed), and WS traffic is initially captured by the
-    // injected page-level interceptor.  We only attach the debugger once
-    // real WS activity is detected so that users who only look at HTTP
-    // calls never see the bar.
-    //
-    // `attachDebuggerForWs()` can be called multiple times safely — it
-    // will attach only once.
+    // ── chrome.debugger ───────────────────────────────────────────────
+    // Attached when the panel is first shown, so WS frames of every connection (also ones opened
+    // before the panel was shown) arrive instantly; Chrome then shows its "started debugging this
+    // browser" bar. When Chrome refuses (e.g. another extension has a frame in the page, or a
+    // policy blocks it) the panel shows why, and WS messages still come from the page interceptor
+    // and the DevTools network log.
+    let attachInFlight = false;
+    // The user clicked Retry: report the outcome even if the status didn't change
+    let manualRetryPending = false;
 
-    function attachDebuggerForWs() {
-      if (debuggerAttached) return;     // already connected
-      console.log("🔧 WS activity detected — attaching debugger to tab:", currentTabId);
-
-      chrome.debugger.attach(debuggee, "1.3", () => {
-        if (chrome.runtime.lastError) {
-          const errorMessage = chrome.runtime.lastError.message;
-          console.log("❌ Failed to attach debugger:", errorMessage);
-
-          if (errorMessage.includes("different extension")) {
-            console.log("🚨 Another extension is using the debugger. WS interceptor remains active as fallback.");
-            panelWindow.postMessage(
-              {
-                source: "HAR_EXTRACTOR",
-                type: "DEBUGGER_ERROR",
-                error: errorMessage,
-                suggestions: [
-                  "Another extension is using the debugger",
-                  "Try disabling other debugging extensions",
-                  "Restart Chrome browser",
-                  "Open extension in new tab"
-                ]
-              },
-              "*"
-            );
-          }
-
-          panelWindow.postMessage(
-            {
-              source: "HAR_EXTRACTOR",
-              type: "DEBUGGER_FALLBACK",
-              message: "Debugger unavailable — WS interceptor active. Reload page to capture WebSocket traffic."
-            },
-            "*"
-          );
-
-          // Keep retrying in the background
-          startDebuggerRetry(debuggee, panelWindow);
-          return;
-        }
-
-        debuggerAttached = true;
-        stopDebuggerRetry();
-        console.log("✅ Debugger attached successfully to tab:", currentTabId);
-
+    function enableDebuggerDomains() {
+      const send = (method: string, params: any, optional = false) => {
+        const report = (err: any) => (optional ? console.debug : console.log)(`⚠️ ${method} failed:`, err);
         try {
-          chrome.debugger.sendCommand(debuggee, "Network.enable", {
-            maxTotalBufferSize: 100_000_000,
-            maxResourceBufferSize: 50_000_000
+          chrome.debugger.sendCommand(debuggee, method, params, () => {
+            const err = chrome.runtime.lastError?.message;
+            if (err) report(err);
           });
-          chrome.debugger.sendCommand(debuggee, "Network.setCacheDisabled", { cacheDisabled: true });
-          chrome.debugger.sendCommand(debuggee, "Page.enable", {});
         } catch (e) {
-          console.log("⚠️ Error enabling domains after attach:", (e as any)?.message || e);
+          report((e as any)?.message || e);
         }
-
-        chrome.debugger.sendCommand(
-          debuggee,
-          "Target.setAutoAttach",
-          { autoAttach: true, waitForDebuggerOnStart: false, flatten: true },
-          () => {
-            if (chrome.runtime.lastError) {
-              console.log("⚠️ setAutoAttach error:", chrome.runtime.lastError.message);
-            } else {
-              console.log("🎯 Target.setAutoAttach enabled");
-            }
-          }
-        );
-        chrome.debugger.sendCommand(
-          debuggee,
-          "Target.setDiscoverTargets",
-          { discover: true },
-          () => {
-            if (chrome.runtime.lastError) {
-              console.debug("setDiscoverTargets not available:", chrome.runtime.lastError.message);
-            } else {
-              console.log("🔭 Target.setDiscoverTargets enabled");
-            }
-          }
-        );
-
-        panelWindow.postMessage(
-          { source: "HAR_EXTRACTOR", type: "DEBUGGER_RECONNECTED" },
-          "*"
-        );
-        try { startWsWatchdog(); } catch {}
-      });
+      };
+      send("Network.enable", { maxTotalBufferSize: 100_000_000, maxResourceBufferSize: 50_000_000 });
+      send("Network.setCacheDisabled", { cacheDisabled: true });
+      send("Page.enable", {});
+      send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
+      // Usually "Not allowed" for extensions
+      send("Target.setDiscoverTargets", { discover: true }, true);
     }
 
-    // Listen for debugger detach events (e.g. the user closed the "debugging this browser" bar)
-    chrome.debugger.onDetach.addListener((detachedDebuggee: any, reason: string) => {
-      if (detachedDebuggee.tabId === currentTabId) {
-        console.log("🔌 Debugger detached:", reason);
-        debuggerAttached = false;
-        panelWindow?.postMessage(
-          { source: "HAR_EXTRACTOR", type: "DEBUGGER_DISCONNECTED" },
-          "*"
-        );
-        // The page interceptor keeps capturing WS traffic on its own
-        injectWsInterceptor();
-        // Do NOT auto-retry — let the user manually reconnect from the WS table overlay.
-        // Auto-retry causes the annoying "debugging this browser" bar to reappear.
-        stopDebuggerRetry();
+    function onDebuggerAttached() {
+      console.log("✅ Debugger attached to tab:", currentTabId);
+      debuggerAttached = true;
+      debuggerCancelledByUser = false;
+      debuggerBlockedByExtensionFrame = false;
+      stopDebuggerRetry();
+      enableDebuggerDomains();
+      setDebuggerStatus({ state: 'attached' }, manualRetryPending);
+      manualRetryPending = false;
+      try { startWsWatchdog(); } catch {}
+      scheduleHarPoll();
+    }
+
+    function onDebuggerAttachFailed(error: string) {
+      console.log("❌ Failed to attach debugger:", error);
+      debuggerBlockedByExtensionFrame = /chrome-extension:|different extension/i.test(error);
+      let hint = "";
+      let retry = true;
+      if (debuggerBlockedByExtensionFrame) {
+        hint = "Another extension has a frame in this page (e.g. a password manager or Salesforce Inspector). Disable it for this site, then click Retry.";
+      } else if (/policy|restricted on this target/i.test(error)) {
+        hint = "Your organization's Chrome policy blocks debugging this page.";
+        retry = false;
+      } else if (/chrome:\/\/|Cannot access contents|cannot be scripted|Cannot attach to this target|file URL/i.test(error)) {
+        hint = "Chrome doesn't allow debugging this page.";
+        retry = false;
       }
+      const changed = setDebuggerStatus({ state: 'unavailable', error, hint }, manualRetryPending);
+      manualRetryPending = false;
+      if (retry && panelVisible) startDebuggerRetry(attachDebuggerForWs);
+      // Read the network log more often now that the debugger isn't delivering frames
+      if (changed) scheduleHarPoll(0);
+    }
+
+    function attachDebuggerForWs() {
+      if (debuggerAttached || attachInFlight) return;
+      attachInFlight = true;
+      console.log("🔧 Attaching debugger to tab:", currentTabId);
+      try {
+        chrome.debugger.attach(debuggee, "1.3", () => {
+          attachInFlight = false;
+          const error: string | undefined = chrome.runtime.lastError?.message;
+          // "Already attached" is this extension's own earlier attachment (it outlives DevTools)
+          if (error && !/already attached/i.test(error)) onDebuggerAttachFailed(error);
+          else onDebuggerAttached();
+        });
+      } catch (e) {
+        attachInFlight = false;
+        onDebuggerAttachFailed((e as any)?.message || String(e));
+      }
+    }
+
+    chrome.debugger.onDetach.addListener((detachedDebuggee: any, reason: string) => {
+      if (detachedDebuggee.tabId !== currentTabId) return;
+      console.log("🔌 Debugger detached:", reason);
+      debuggerAttached = false;
+      attachedTargetIds.clear();
+      if (reason === "canceled_by_user") {
+        // The user closed Chrome's debugging bar: only reattach when they click Retry
+        debuggerCancelledByUser = true;
+        stopDebuggerRetry();
+        setDebuggerStatus({
+          state: 'detached',
+          error: "Chrome's \"started debugging this browser\" bar was closed",
+          hint: "Click Retry to reattach.",
+        });
+      } else {
+        // Chrome also detaches when a frame of another extension is added to the page
+        debuggerBlockedByExtensionFrame = reason === "target_closed";
+        setDebuggerStatus({
+          state: 'detached',
+          error: `Chrome detached the debugger (${reason})`,
+          hint: reason === "target_closed"
+            ? "This usually means another extension added a frame to the page (e.g. a password manager or Salesforce Inspector). Disable it for this site, then click Retry."
+            : "",
+        });
+        if (panelVisible) startDebuggerRetry(attachDebuggerForWs);
+      }
+      // The page interceptor and the network log keep capturing WS traffic on their own
+      injectWsInterceptor();
+      scheduleHarPoll(0);
     });
 
-    // Expose the lazy attach so the WS interceptor (module-scope) can trigger it
-    lazyAttachDebuggerFn = attachDebuggerForWs;
     attachDebuggerRef = attachDebuggerForWs;
 
     // Always rebind the listener safely
     chrome.debugger.onEvent.removeListener(handleEvent);
     chrome.debugger.onEvent.addListener(handleEvent);
 
-    // Eagerly attach debugger so WS frames on existing connections are captured.
-    // The page-level interceptor can only catch NEW WebSocket() calls, but
-    // Salesforce/CPQ pages open WS connections on page load — before the panel
-    // is shown — so the interceptor misses them. The debugger API hooks into
-    // Chrome's network layer and captures frames on all connections.
     attachDebuggerForWs();
 
-    // WS Interceptor Fallback: always inject + poll so WS works even without debugger.
-    // Frames captured by both the debugger and the interceptor are shown once (see handleWsFrame).
+    // The page interceptor works without the debugger. Frames captured more than once
+    // (debugger, interceptor, network log) are shown once (see isWsCrossSourceDuplicate).
     injectWsInterceptor();
     startWsPolling(panelWindow);
 
-    // Re-inject the WS interceptor after page navigations. Captured calls are NOT cleared on
-    // navigation (full reloads or in-app route changes) — they stay until the user clears them.
+    // ── Page navigations ──────────────────────────────────────────────
+    // Like the DevTools Network tab: a page (re)load that resets the DevTools network log also
+    // resets the tables, while in-app route changes and DevTools' "Preserve log" keep the rows.
+    // A navigation counts as a (re)load when the network log has a new page load (HAR pages) and
+    // no longer lists any request that started before it.
+    let pendingNav: { pageIdBefore: number | null; navTimes: number[]; firstAt: number } | null = null;
+    let reconcileTimer: ReturnType<typeof setTimeout> | null = null;
+    let finalPassTimer: ReturnType<typeof setTimeout> | null = null;
+    let navAttachTimer: ReturnType<typeof setTimeout> | null = null;
+    // Highest page load id seen by the last navigation check
+    let lastReconciledPageId = -1;
+
+    function reconcileAfterNavigation() {
+      reconcileTimer = null;
+      const nav = pendingNav;
+      pendingNav = null;
+      if (!nav) return;
+      const snapshot = [...httpRowState].map(([key, st]) => [key, st.looseId] as [string, string]);
+      withHar((har) => {
+        if (!har) return;
+        const pages: any[] = har.pages || [];
+        const before = Math.max(nav.pageIdBefore ?? -1, lastReconciledPageId);
+        let page: any = null;
+        let pageId = before;
+        let maxId = -1;
+        for (const p of pages) {
+          const id = getHarPageId(p?.id);
+          maxId = Math.max(maxId, id);
+          if (id > pageId) {
+            page = p;
+            pageId = id;
+          }
+        }
+        lastReconciledPageId = Math.max(lastReconciledPageId, maxId);
+
+        const boundary = page ? getHarStartMs(page) : NaN;
+        let reset = !!page && isFinite(boundary);
+        // The log wasn't read before this navigation: the new page load must be recent
+        if (reset && nav.pageIdBefore === null && boundary < nav.navTimes[0] - 60_000) reset = false;
+        // Requests older than the new page are still listed: "Preserve log" is on
+        if (reset && (har.entries || []).some((e: any) => getHarStartMs(e) < boundary - 1000)) reset = false;
+
+        if (reset) resetForNewPage(har, page, boundary, nav.navTimes, snapshot);
+        backfillHttpFromHar(har);
+        processHarWebSockets(panelWindow, har, reset);
+      });
+    }
+
+    function resetForNewPage(har: any, page: any, boundary: number, navTimes: number[], snapshot: [string, string][]) {
+      pageResetAt = boundary;
+      pageResetPageRef = page.id;
+      // WS messages from before the new page committed belong to the previous page
+      const committedAt = navTimes.find((t) => t >= boundary) ?? boundary;
+      wsResetCutoff = Math.max(boundary, committedAt - 300);
+      pruneWsRecentFrames((e) => e.frameTime >= wsResetCutoff);
+
+      // Rows of calls the network log no longer lists (they belonged to the previous page)
+      const inLog = new Set<string>((har.entries || []).map(getHarLooseId));
+      const remove = new Set<string>();
+      for (const [key, looseId] of snapshot) {
+        if (!inLog.has(looseId)) remove.add(key);
+      }
+      for (const [key, st] of httpRowState) {
+        if (st.startTime < boundary && !inLog.has(st.looseId)) remove.add(key);
+      }
+      for (const key of remove) httpRowState.delete(key);
+
+      latestWsBaseUrl = null;
+      postedWsBaseUrl = null;
+      for (const [taskId, t] of wsSentTimestamps) {
+        if (t < wsResetCutoff) wsSentTimestamps.delete(taskId);
+      }
+      console.log(`🔄 Page (re)loaded — showing the new page's calls only (${remove.size} HTTP rows removed)`);
+      panelWindow?.postMessage(
+        { source: "HAR_EXTRACTOR", type: "PAGE_RESET", payload: { before: wsResetCutoff, removeHttpKeys: [...remove] } },
+        "*"
+      );
+
+      // Calls of the previous page that were still finishing during the reload can arrive a bit
+      // later: drop the rows the network log doesn't list once things have settled.
+      if (finalPassTimer) clearTimeout(finalPassTimer);
+      const pageRef = page.id;
+      finalPassTimer = setTimeout(() => {
+        finalPassTimer = null;
+        const snap = [...httpRowState].map(([key, st]) => [key, st.looseId] as [string, string]);
+        withHar((h) => {
+          if (!h || pageResetPageRef !== pageRef || !(h.pages || []).some((p: any) => p?.id === pageRef)) return;
+          const ids = new Set<string>((h.entries || []).map(getHarLooseId));
+          const stale = snap.filter(([key, looseId]) => !ids.has(looseId) && httpRowState.has(key)).map(([key]) => key);
+          if (!stale.length) return;
+          for (const key of stale) httpRowState.delete(key);
+          panelWindow?.postMessage(
+            { source: "HAR_EXTRACTOR", type: "HTTP_RESYNC", payload: { remove: stale, restyle: [] } },
+            "*"
+          );
+        });
+      }, 2500);
+    }
+
     if (!onNavigatedListenerAdded) {
       chrome.devtools.network.onNavigated.addListener((url: string) => {
-        console.log("🔄 onNavigated:", url, "- re-injecting WS interceptor (captured calls are kept)");
-        // Re-inject interceptor after a short delay for page context to be ready
+        console.log("🔄 onNavigated:", url);
+        // Re-inject the interceptor once the new page's context is ready (retried for slow pages)
         setTimeout(() => injectWsInterceptor(), 100);
-        // Double-inject after 500ms as safety net for slow-loading pages
         setTimeout(() => injectWsInterceptor(), 500);
-        // Third inject at 1.5s for very slow pages
         setTimeout(() => injectWsInterceptor(), 1500);
+
+        // Check (once navigations settle) whether this was a page (re)load
+        const now = Date.now();
+        if (!pendingNav) {
+          pendingNav = { pageIdBefore: harBaselineKnown ? maxPageIdSeen : null, navTimes: [], firstAt: now };
+        }
+        pendingNav.navTimes.push(now);
+        if (reconcileTimer) clearTimeout(reconcileTimer);
+        reconcileTimer = setTimeout(reconcileAfterNavigation, Math.max(0, Math.min(300, pendingNav.firstAt + 1500 - now)));
+
+        // The new page may allow attaching (e.g. after leaving a chrome:// page). When another
+        // extension's frame blocked it, wait until that frame is back so the attach fails cleanly
+        // instead of flashing Chrome's debugging bar.
+        if (!debuggerAttached && !debuggerCancelledByUser) {
+          if (navAttachTimer) clearTimeout(navAttachTimer);
+          navAttachTimer = setTimeout(() => {
+            navAttachTimer = null;
+            attachDebuggerForWs();
+          }, debuggerBlockedByExtensionFrame ? 3000 : 0);
+        }
       });
       onNavigatedListenerAdded = true;
     }
@@ -1116,9 +1441,11 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
       chrome.devtools.network.onRequestFinished.addListener((request: any) => {
         const url = request.request?.url;
         if (!url) return;
+        const startTime = getHarStartMs(request);
         // Finished before the user's last Clear
-        const startTime = new Date(request.startedDateTime).getTime();
         if (startTime + (request.time || 0) < logsClearedAt) return;
+        // A call of the page that was there before the last page (re)load
+        if (startTime < pageResetAt && request.pageref !== pageResetPageRef) return;
 
         const matchedPattern = shouldProcessUrl(url);
         if (!matchedPattern) return;
@@ -1131,7 +1458,15 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
         const key = `${base}#${n}`;
         const req = parseHttpRequestBody(request);
         const gen = ++httpRowGen;
-        httpRowState.set(key, { url, pattern: matchedPattern, apexMethod: req?.method, tentative: false, gen });
+        httpRowState.set(key, {
+          url,
+          pattern: matchedPattern,
+          apexMethod: req?.method,
+          tentative: false,
+          gen,
+          startTime,
+          looseId: getHarLooseId(request),
+        });
 
         request.getContent((content: string) => postHttpRow(request, req, key, gen, 'orf', content));
       });
@@ -1286,10 +1621,7 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
         if (wsUrl) {
           if (reqId) wsUrlsByRequestId[reqId] = wsUrl;
           latestWsBaseUrl = wsUrl;
-          panelWindow.postMessage(
-            { source: "HAR_EXTRACTOR", type: "WS_BASE_URL", payload: wsUrl },
-            "*"
-          );
+          postWsBaseUrl(panelWindow, wsUrl);
         }
         return;
       }
@@ -1304,16 +1636,7 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
         }
 
         // Send the WebSocket base URL to the panel
-        if (wsUrl) {
-          panelWindow.postMessage(
-            {
-              source: "HAR_EXTRACTOR",
-              type: "WS_BASE_URL",
-              payload: wsUrl
-            },
-            "*"
-          );
-        }
+        postWsBaseUrl(panelWindow, wsUrl);
 
         // Self-healing: when a WS handshake is seen, ensure Network is enabled on all
         // attached sub-targets so subsequent frames are captured. This fixes the case where
@@ -1380,7 +1703,7 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
         }
 
         const reqId = params?.requestId;
-        handleWsFrame(
+        const row = handleWsFrame(
           panelWindow,
           'dbg',
           direction,
@@ -1389,6 +1712,7 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
           (reqId && wsUrlsByRequestId[reqId]) || latestWsBaseUrl,
           `${reqId}|${params?.timestamp}|${direction}`
         );
+        if (row) postWsRows(panelWindow, [row]);
         return;
       }
     }
@@ -1442,34 +1766,49 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
     // Backfills matching calls that are already in the DevTools network log (e.g. finished before
     // the panel was opened, or newly matching after a URL-pattern change). Calls already in the
     // table are skipped; calls still in flight are added by onRequestFinished once they finish.
-    function sendInitialHar() {
-      if (!chrome.devtools.network.getHAR) return;
+    function backfillHttpFromHar(harLog: any) {
+      if (!harLog) return;
+      const occurrences = new Map<string, number>();
+      for (const entry of harLog.entries || []) {
+        const url = entry?.request?.url;
+        if (!url) continue;
+        // Still in flight
+        if (!entry.response?.status && !entry.response?._error) continue;
+        const startTime = getHarStartMs(entry);
+        // Finished before the user's last Clear
+        if (startTime + (entry.time || 0) < logsClearedAt) continue;
+        // A call of the page that was there before the last page (re)load
+        if (startTime < pageResetAt && entry.pageref !== pageResetPageRef) continue;
 
-      chrome.devtools.network.getHAR((harLog: any) => {
-        const occurrences = new Map<string, number>();
-        for (const entry of harLog?.entries || []) {
-          const url = entry?.request?.url;
-          if (!url) continue;
-          // Still in flight
-          if (!entry.response?.status && !entry.response?._error) continue;
-          // Finished before the user's last Clear
-          const startTime = new Date(entry.startedDateTime).getTime();
-          if (startTime + (entry.time || 0) < logsClearedAt) continue;
+        const matchedPattern = shouldProcessUrl(url);
+        if (!matchedPattern) continue;
 
-          const matchedPattern = shouldProcessUrl(url);
-          if (!matchedPattern) continue;
+        const base = getHttpBaseKey(entry);
+        const n = occurrences.get(base) || 0;
+        occurrences.set(base, n + 1);
+        const key = `${base}#${n}`;
+        if (httpRowState.has(key)) continue;
 
-          const base = getHttpBaseKey(entry);
-          const n = occurrences.get(base) || 0;
-          occurrences.set(base, n + 1);
-          const key = `${base}#${n}`;
-          if (httpRowState.has(key)) continue;
+        const req = parseHttpRequestBody(entry);
+        const gen = ++httpRowGen;
+        httpRowState.set(key, {
+          url,
+          pattern: matchedPattern,
+          apexMethod: req?.method,
+          tentative: true,
+          gen,
+          startTime,
+          looseId: getHarLooseId(entry),
+        });
+        entry.getContent((content: any) => postHttpRow(entry, req, key, gen, 'har', content));
+      }
+    }
 
-          const req = parseHttpRequestBody(entry);
-          const gen = ++httpRowGen;
-          httpRowState.set(key, { url, pattern: matchedPattern, apexMethod: req?.method, tentative: true, gen });
-          entry.getContent((content: any) => postHttpRow(entry, req, key, gen, 'har', content));
-        }
+    // Adds what's in the DevTools network log but not in the tables yet (HTTP calls and WS messages)
+    function refreshFromHar() {
+      withHar((har) => {
+        backfillHttpFromHar(har);
+        processHarWebSockets(panelWindow, har);
       });
     }
 
@@ -1494,7 +1833,7 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
           "*"
         );
       }
-      sendInitialHar();
+      refreshFromHar();
     }
 
     panelWindow.postMessage({ source: "HAR_EXTRACTOR", type: "INIT" }, "*");
@@ -1518,8 +1857,9 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
         logsClearedAt = Date.now();
         httpRowState.clear();
         seenWsMessages.clear();
-        wsRecentFrames.clear();
+        clearWsRecentFrames();
         wsSentTimestamps.clear();
+        postedWsBaseUrl = null;
         // Clear loading state when logs are cleared
         pendingNetworkRequests.clear();
         if (loadingTimeoutId) {
@@ -1626,295 +1966,33 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
       }
 
       if (event.data.type === "RECONNECT_DEBUGGER") {
-        console.log("🔌 DevTools received RECONNECT_DEBUGGER message");
-        
-        const forceReconnection = () => {
-          console.log("🔌 Force reconnection - resetting debugger state");
-          debuggerAttached = false;
-          
-          // Strategy 1: Try graceful detach first
-          const attemptGracefulDetach = () => {
-            return new Promise((resolve) => {
-              try {
-                chrome.debugger.detach(debuggee, () => {
-                  console.log("🔌 Graceful detach completed");
-                  resolve(true);
-                });
-              } catch (error) {
-                console.log("🔌 Graceful detach failed:", (error as any)?.message);
-                resolve(false);
-              }
-            });
-          };
-
-          // Strategy 2: Force detach ignoring errors
-          const attemptForceDetach = () => {
-            try {
-              chrome.debugger.detach(debuggee);
-              console.log("🔌 Force detach completed");
-            } catch (error) {
-              console.log("🔌 Force detach failed (expected):", (error as any)?.message);
-            }
-          };
-
-          // Strategy 3: Aggressive attachment with multiple attempts
-          const attemptAttachment = (attempt = 1, maxAttempts = 5) => {
-            console.log(`🔌 Attachment attempt ${attempt}/${maxAttempts}`);
-            
-            chrome.debugger.attach(debuggee, "1.3", () => {
-              if (chrome.runtime.lastError) {
-                const errorMessage = chrome.runtime.lastError.message;
-                console.log(`❌ Attempt ${attempt} failed:`, errorMessage);
-                
-                // Handle specific error cases with different strategies
-                if (errorMessage.includes("different extension")) {
-                  console.log("🔄 Trying to force override existing debugger connection...");
-                  
-                  // Try to attach with different protocol version
-                  chrome.debugger.attach(debuggee, "1.2", () => {
-                    if (chrome.runtime.lastError) {
-                      console.log("🔄 v1.2 failed, trying v1.1...");
-                      chrome.debugger.attach(debuggee, "1.1", () => {
-                        if (chrome.runtime.lastError && attempt < maxAttempts) {
-                          console.log(`🔄 v1.1 failed, retrying attempt ${attempt + 1}...`);
-                          setTimeout(() => attemptAttachment(attempt + 1, maxAttempts), 500);
-                        } else if (!chrome.runtime.lastError) {
-                          console.log("✅ Debugger attached with v1.1");
-                          setupSuccessfulConnection();
-                        } else {
-                          console.log("🔌 All attachment attempts exhausted, proceeding anyway...");
-                          assumeConnectionAndProceed();
-                        }
-                      });
-                    } else {
-                      console.log("✅ Debugger attached with v1.2");
-                      setupSuccessfulConnection();
-                    }
-                  });
-                } else if (errorMessage.includes("already attached")) {
-                  console.log("🔌 Debugger already attached, assuming it's working");
-                  assumeConnectionAndProceed();
-                } else if (attempt < maxAttempts) {
-                  // Generic retry for other errors
-                  console.log(`🔄 Retrying in ${attempt * 200}ms...`);
-                  setTimeout(() => attemptAttachment(attempt + 1, maxAttempts), attempt * 200);
-                } else {
-                  console.log("🔌 All attempts failed, forcing optimistic connection...");
-                  assumeConnectionAndProceed();
-                }
-              } else {
-                console.log("✅ Debugger attached successfully on attempt", attempt);
-                setupSuccessfulConnection();
-              }
-            });
-          };
-
-          // Strategy 4: Assume connection and proceed optimistically
-          const assumeConnectionAndProceed = () => {
-            console.log("🔌 Assuming debugger connection exists, proceeding optimistically...");
-            debuggerAttached = true;
-            
-            // Enhanced diagnostics for Windows Chrome profile issues
-            console.log("🔍 WINDOWS PROFILE DIAGNOSTICS:");
-            console.log("   - Chrome User Agent:", navigator.userAgent);
-            console.log("   - Extension storage check:", localStorage.length, "items");
-            console.log("   - WebSocket support:", typeof WebSocket !== 'undefined');
-            console.log("   - DevTools API availability:", typeof chrome?.devtools !== 'undefined');
-            
-            // Clear any potentially corrupted extension state for Windows Chrome
-            if (navigator.userAgent.includes('Windows')) {
-              console.log("🧹 Windows Chrome detected - clearing potentially corrupted state...");
-              try {
-                // Clear extension-specific localStorage that might be corrupted
-                const keysToCheck = [
-                  'har_extractor_ws_state',
-                  'har_extractor_debugger_state', 
-                  'har_extractor_ws_timestamp',
-                  'har_extractor_last_ws_connection'
-                ];
-                
-                keysToCheck.forEach(key => {
-                  const value = localStorage.getItem(key);
-                  if (value) {
-                    console.log(`🧹 Removing potentially corrupted key: ${key} = ${value}`);
-                    localStorage.removeItem(key);
-                  }
-                });
-                
-                // Reset WebSocket state variables
-                wsMonoToWallOffsetMs = null;
-                seenWsMessages.clear();
-                
-                console.log("✅ Windows Chrome state cleanup completed");
-              } catch (error) {
-                console.log("⚠️ State cleanup failed:", (error as any)?.message);
-              }
-            }
-            
-            // Try to enable domains, ignore any errors
-            try {
-              chrome.debugger.sendCommand(debuggee, "Network.enable", {
-                maxTotalBufferSize: 100_000_000,
-                maxResourceBufferSize: 50_000_000
-              }, () => {
-                console.log("📡 Network.enable sent (may have failed silently)");
-              });
-              chrome.debugger.sendCommand(debuggee, "Network.setCacheDisabled", { cacheDisabled: true }, () => {
-                console.log("🧩 Network cache disabled");
-              });
-              chrome.debugger.sendCommand(debuggee, "Page.enable", {}, () => {
-                console.log("📄 Page.enable sent (may have failed silently)");
-              });
-              // Ensure sub-targets are auto-attached after optimistic reconnect
-              chrome.debugger.sendCommand(
-                debuggee,
-                "Target.setAutoAttach",
-                { autoAttach: true, waitForDebuggerOnStart: false, flatten: true },
-                () => {
-                  if (chrome.runtime.lastError) {
-                    console.log("⚠️ setAutoAttach error:", chrome.runtime.lastError.message);
-                  } else {
-                    console.log("🎯 Target.setAutoAttach enabled");
-                  }
-                }
-              );
-              chrome.debugger.sendCommand(
-                debuggee,
-                "Target.setDiscoverTargets",
-                { discover: true },
-                () => {
-                  if (chrome.runtime.lastError) {
-                    console.debug("setDiscoverTargets not available:", chrome.runtime.lastError.message);
-                  } else {
-                    console.log("🔭 Target.setDiscoverTargets enabled");
-                  }
-                }
-              );
-              
-              // Force enable WebSocket debugging specifically for Windows Chrome
-              if (navigator.userAgent.includes('Windows')) {
-                console.log("🔌 Windows Chrome: Force enabling WebSocket debugging...");
-                chrome.debugger.sendCommand(debuggee, "Runtime.enable", {}, () => {
-                  console.log("🔧 Runtime.enable sent for Windows Chrome");
-                });
-                chrome.debugger.sendCommand(debuggee, "Network.enableReportingApi", {enable: true}, () => {
-                  console.log("📊 Network.enableReportingApi sent for Windows Chrome");
-                });
-              }
-            } catch (error) {
-              console.log("🔌 Command sending failed, but continuing anyway:", (error as any)?.message || error);
-            }
-            
-            // Always notify UI - use DEBUGGER_FALLBACK since we aren't sure the debugger is actually working
-            panelWindow.postMessage(
-              { 
-                source: "HAR_EXTRACTOR", 
-                type: "DEBUGGER_FALLBACK",
-                message: "Debugger assumed connected - WS interceptor active as backup."
-              },
-              "*"
-            );
-
-            // Ensure WS interceptor is active as fallback
-            injectWsInterceptor();
-
-            // Kick WS watchdog
-            startWsWatchdog();
-            
-            // Try to load HAR data
-            try {
-              sendInitialHar();
-            } catch (error) {
-              console.log("📂 HAR loading failed, but connection assumed successful");
-            }
-          };
-
-          // Strategy 5: Setup successful connection
-          const setupSuccessfulConnection = () => {
-            debuggerAttached = true;
-            
-            try {
-              chrome.debugger.sendCommand(debuggee, "Network.enable", {
-                maxTotalBufferSize: 100_000_000,
-                maxResourceBufferSize: 50_000_000
-              });
-              chrome.debugger.sendCommand(debuggee, "Network.setCacheDisabled", { cacheDisabled: true });
-              chrome.debugger.sendCommand(debuggee, "Page.enable", {});
-              // Also ensure sub-targets are auto-attached on successful attach
-              chrome.debugger.sendCommand(
-                debuggee,
-                "Target.setAutoAttach",
-                { autoAttach: true, waitForDebuggerOnStart: false, flatten: true },
-                () => {
-                  if (chrome.runtime.lastError) {
-                    console.log("⚠️ setAutoAttach error:", chrome.runtime.lastError.message);
-                  } else {
-                    console.log("🎯 Target.setAutoAttach enabled");
-                  }
-                }
-              );
-              chrome.debugger.sendCommand(
-                debuggee,
-                "Target.setDiscoverTargets",
-                { discover: true },
-                () => {
-                  if (chrome.runtime.lastError) {
-                    console.debug("setDiscoverTargets not available:", chrome.runtime.lastError.message);
-                  } else {
-                    console.log("🔭 Target.setDiscoverTargets enabled");
-                  }
-                }
-              );
-              console.log("✅ All debugger commands sent successfully");
-            } catch (error) {
-              console.log("⚠️ Command sending failed:", (error as any)?.message || error);
-            }
-            
-            // Notify panel that debugger is reconnected
-            panelWindow.postMessage(
-              { source: "HAR_EXTRACTOR", type: "DEBUGGER_RECONNECTED" },
-              "*"
-            );
-            
-            // Kick WS watchdog
-            startWsWatchdog();
-            
-            // Trigger initial HAR load after reconnection
-            sendInitialHar();
-          };
-
-          // Execute the reconnection strategy sequence
-          console.log("🚀 Starting aggressive reconnection sequence...");
-          
-          // First try graceful detach
-          attemptGracefulDetach().then(() => {
-            // Then force detach regardless of graceful result
-            attemptForceDetach();
-            
-            // Wait a moment for cleanup
-            setTimeout(() => {
-              // Start attachment attempts
-              attemptAttachment();
-            }, 100);
-          });
-        };
-
-        // Re-inject interceptor for fallback capture while reconnecting
+        // Retry button in the panel: (re)attach now, also after the user closed Chrome's debugging bar
+        console.log("🔌 Panel requested a debugger reconnect");
+        debuggerCancelledByUser = false;
+        manualRetryPending = true;
+        stopDebuggerRetry();
+        if (debuggerAttached) {
+          enableDebuggerDomains();
+          setDebuggerStatus({ state: 'attached' }, true);
+          manualRetryPending = false;
+        } else {
+          attachDebuggerForWs();
+        }
         injectWsInterceptor();
-
-        // Always execute the force reconnection
-        forceReconnection();
+        refreshFromHar();
       }
     };
 
     handlePanelMessageRef = handlePanelMessage;
-    sendInitialHarRef = sendInitialHar;
+    refreshFromHarRef = refreshFromHar;
 
     // Listen on both panelWindow and window to ensure we catch all messages
     panelWindow.addEventListener("message", handlePanelMessage);
     window.addEventListener("message", handlePanelMessage);
 
-    // Backfill matching calls that finished before the panel was opened
-    sendInitialHar();
+    // Backfill the calls and WS messages that are already in the DevTools network log, then keep
+    // reading new WS messages from it
+    refreshFromHar();
+    scheduleHarPoll();
   });
 });
