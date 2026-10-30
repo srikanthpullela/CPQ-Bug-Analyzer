@@ -825,6 +825,7 @@ The extension comes with pre-configured patterns for:
 
 ### Customization Options
 - **Dark Mode**: Toggle via header button, preference saved automatically
+- **Show all**: Header switch that shows every network call instead of only the ones matching your URL patterns, preference saved automatically
 - **Panel Sizing**: Drag panel borders to resize, sizing persists across sessions
 - **Search Scope**: Search applies to all captured data including nested objects
 - **Pattern Management**: Add, edit, or remove URL patterns via settings modal

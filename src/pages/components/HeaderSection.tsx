@@ -1,5 +1,5 @@
 import React from "react";
-import { RotateCcw, Moon, Sun, BarChart2, Search, Trash2, Zap, BellRing, Settings, Globe } from "lucide-react";
+import { RotateCcw, Moon, Sun, BarChart2, Search, Trash2, Zap, BellRing, Settings } from "lucide-react";
 import { SearchInput } from "./SearchInput";
 
 interface HeaderSectionProps {
@@ -113,19 +113,37 @@ export const HeaderSection: React.FC<HeaderSectionProps> = ({
           </button>
 
           <button
+            type="button"
+            role="switch"
+            aria-checked={showAllCalls}
             onClick={onToggleShowAllCalls}
-            className={`p-1 rounded transition-colors duration-75 ${
+            className={`flex items-center gap-1.5 px-1.5 py-1 rounded text-xs font-medium leading-none whitespace-nowrap transition-colors duration-75 ${
               showAllCalls
                 ? isDarkMode
-                  ? "bg-indigo-600 hover:bg-indigo-500 text-white"
-                  : "bg-indigo-500 hover:bg-indigo-600 text-white"
+                  ? "bg-indigo-900 hover:bg-indigo-800 text-indigo-100"
+                  : "bg-indigo-50 hover:bg-indigo-100 text-indigo-700"
                 : isDarkMode
                   ? "bg-gray-700 hover:bg-gray-600 text-gray-300"
                   : "bg-gray-100 hover:bg-gray-200 text-gray-600"
             }`}
-            title={showAllCalls ? "Showing all calls (click to filter)" : "Showing filtered calls (click to show all)"}
+            title={
+              showAllCalls
+                ? "Showing all network calls. Turn off to show only calls matching your URL patterns."
+                : "Showing only calls matching your URL patterns. Turn on to show all network calls."
+            }
           >
-            <Globe className="h-3.5 w-3.5" />
+            <span
+              className={`inline-flex items-center flex-shrink-0 w-6 h-3.5 rounded-full transition-colors duration-150 ${
+                showAllCalls ? "bg-indigo-500" : isDarkMode ? "bg-gray-500" : "bg-gray-400"
+              }`}
+            >
+              <span
+                className={`inline-block w-2.5 h-2.5 rounded-full bg-white shadow transform transition-transform duration-150 ${
+                  showAllCalls ? "translate-x-3" : "translate-x-0.5"
+                }`}
+              />
+            </span>
+            Show all
           </button>
 
           <button
