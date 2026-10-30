@@ -1143,24 +1143,26 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
     // The user clicked Retry: report the outcome even if the status didn't change
     let manualRetryPending = false;
 
+    // Always passes a callback: without one, sendCommand returns a promise, and a failed command
+    // then shows up as an "Uncaught (in promise)" error of the extension in chrome://extensions.
+    function sendDebuggerCommand(method: string, params: any, onDone?: () => void) {
+      try {
+        chrome.debugger.sendCommand(debuggee, method, params, () => {
+          const err = chrome.runtime.lastError?.message;
+          if (err) console.log(`⚠️ ${method} failed:`, err);
+          onDone?.();
+        });
+      } catch (e) {
+        console.log(`⚠️ ${method} failed:`, (e as any)?.message || e);
+      }
+    }
+
+    // Target.setDiscoverTargets isn't sent: Chrome always answers "Not allowed" to extensions
     function enableDebuggerDomains() {
-      const send = (method: string, params: any, optional = false) => {
-        const report = (err: any) => (optional ? console.debug : console.log)(`⚠️ ${method} failed:`, err);
-        try {
-          chrome.debugger.sendCommand(debuggee, method, params, () => {
-            const err = chrome.runtime.lastError?.message;
-            if (err) report(err);
-          });
-        } catch (e) {
-          report((e as any)?.message || e);
-        }
-      };
-      send("Network.enable", { maxTotalBufferSize: 100_000_000, maxResourceBufferSize: 50_000_000 });
-      send("Network.setCacheDisabled", { cacheDisabled: true });
-      send("Page.enable", {});
-      send("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
-      // Usually "Not allowed" for extensions
-      send("Target.setDiscoverTargets", { discover: true }, true);
+      sendDebuggerCommand("Network.enable", { maxTotalBufferSize: 100_000_000, maxResourceBufferSize: 50_000_000 });
+      sendDebuggerCommand("Network.setCacheDisabled", { cacheDisabled: true });
+      sendDebuggerCommand("Page.enable", {});
+      sendDebuggerCommand("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
     }
 
     function onDebuggerAttached() {
@@ -1725,15 +1727,12 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
         const inactive = !lastWsEventTime || (Date.now() - lastWsEventTime > 5500);
         if (inactive) {
           console.log("⏱️ WS inactivity detected - re-enabling Network/Targets");
-          try {
-            chrome.debugger.sendCommand(debuggee, "Network.enable", {
-              maxTotalBufferSize: 100_000_000,
-              maxResourceBufferSize: 50_000_000
-            });
-            chrome.debugger.sendCommand(debuggee, "Page.enable", {});
-            chrome.debugger.sendCommand(debuggee, "Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
-            chrome.debugger.sendCommand(debuggee, "Target.setDiscoverTargets", { discover: true });
-          } catch {}
+          sendDebuggerCommand("Network.enable", {
+            maxTotalBufferSize: 100_000_000,
+            maxResourceBufferSize: 50_000_000
+          });
+          sendDebuggerCommand("Page.enable", {});
+          sendDebuggerCommand("Target.setAutoAttach", { autoAttach: true, waitForDebuggerOnStart: false, flatten: true });
         }
       }, 5600);
 
@@ -1743,22 +1742,20 @@ chrome.devtools.panels.create("Conga Debugger", "icon-16.png", "panel.html", (pa
         const stillInactive = !lastWsEventTime || (Date.now() - lastWsEventTime > 11000);
         if (stillInactive) {
           console.log("⏱️ WS still inactive after 12s — trying deeper recovery");
-          try {
-            // Disable then re-enable Network to force Chrome to re-emit WS events
-            chrome.debugger.sendCommand(debuggee, "Network.disable", {}, () => {
-              if (!debuggerAttached) return;
-              chrome.debugger.sendCommand(debuggee, "Network.enable", {
-                maxTotalBufferSize: 100_000_000,
-                maxResourceBufferSize: 50_000_000
-              });
+          // Disable then re-enable Network to force Chrome to re-emit WS events
+          sendDebuggerCommand("Network.disable", {}, () => {
+            if (!debuggerAttached) return;
+            sendDebuggerCommand("Network.enable", {
+              maxTotalBufferSize: 100_000_000,
+              maxResourceBufferSize: 50_000_000
             });
-            // Try auto-attach without flatten for broader compatibility
-            chrome.debugger.sendCommand(debuggee, "Target.setAutoAttach", {
-              autoAttach: true,
-              waitForDebuggerOnStart: false,
-              flatten: true
-            });
-          } catch {}
+          });
+          // Try auto-attach without flatten for broader compatibility
+          sendDebuggerCommand("Target.setAutoAttach", {
+            autoAttach: true,
+            waitForDebuggerOnStart: false,
+            flatten: true
+          });
         }
       }, 12000);
     }
